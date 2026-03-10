@@ -21,9 +21,49 @@ function loginSetMode(mode) {
   _loginUpdateDots();
   document.getElementById('loginTabAlumno').classList.toggle('active', mode === 'alumno');
   document.getElementById('loginTabDocente').classList.toggle('active', mode === 'docente');
-  document.getElementById('loginHint').textContent =
-    mode === 'docente' ? 'PIN de docente (1234 por defecto)' : 'Ingresá tu PIN de 4 dígitos';
   document.getElementById('loginError').style.display = 'none';
+  // Show correct panel
+  var panelAlumno  = document.getElementById('loginPanelAlumno');
+  var panelDocente = document.getElementById('loginPanelDocente');
+  if (panelAlumno)  panelAlumno.style.display  = mode === 'alumno'  ? 'block' : 'none';
+  if (panelDocente) panelDocente.style.display = mode === 'docente' ? 'block' : 'none';
+  if (mode === 'docente') setTimeout(function(){ var e=document.getElementById('loginEmail'); if(e) e.focus(); }, 100);
+}
+
+async function docenteLogin() {
+  var email = (document.getElementById('loginEmail')?.value || '').trim();
+  var pass  =  document.getElementById('loginPass')?.value  || '';
+  var errEl = document.getElementById('loginError');
+  var btn   = document.getElementById('loginDocenteBtn');
+  errEl.style.display = 'none';
+
+  if (!email || !pass) {
+    errEl.textContent = 'Completá email y contraseña';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  // Try Firebase first
+  if (window.fbDoLogin) {
+    btn.textContent = 'Ingresando...';
+    btn.disabled = true;
+    var err = await window.fbDoLogin(email, pass);
+    btn.textContent = 'Ingresar';
+    btn.disabled = false;
+    if (!err) return; // onAuthStateChanged calls unlockApp
+    // Firebase failed — fall through to offline PIN fallback only if no internet error
+    if (err.includes('internet') || err.includes('conexión')) {
+      // Offline fallback: accept hardcoded PIN as password
+      if (pass === (state.pin || '1234')) { unlockApp(); return; }
+    }
+    errEl.textContent = err;
+    errEl.style.display = 'block';
+  } else {
+    // No Firebase — offline mode, use PIN as password
+    if (pass === (state.pin || '1234')) { unlockApp(); return; }
+    errEl.textContent = 'Contraseña incorrecta';
+    errEl.style.display = 'block';
+  }
 }
 
 function loginPress(d) {
@@ -54,35 +94,24 @@ function _loginUpdateDots() {
 }
 
 function _loginCheck() {
+  // Only handles alumno PIN — docente uses email form
   const errEl = document.getElementById('loginError');
-  if (_loginMode === 'docente') {
-    if (_loginBuffer === (state.pin || '1234')) {
-      _loginBuffer = '';
-      _loginUpdateDots();
-      errEl.style.display = 'none';
-      unlockApp();
-    } else {
-      _loginError('PIN incorrecto');
-    }
+  let found = null, foundYear = null, foundComision = null;
+  state.years.forEach(y => y.comisiones.forEach(c =>
+    (c.alumnos || []).forEach(a => {
+      if (a.pin && a.pin === _loginBuffer) {
+        found = a; foundYear = y; foundComision = c;
+      }
+    })
+  ));
+  if (found) {
+    _loginBuffer = '';
+    _loginUpdateDots();
+    errEl.style.display = 'none';
+    document.getElementById('loginScreen').style.display = 'none';
+    renderStudentView(found, foundYear, foundComision);
   } else {
-    // Alumno: search by PIN across all comisiones
-    let found = null, foundYear = null, foundComision = null;
-    state.years.forEach(y => y.comisiones.forEach(c =>
-      (c.alumnos || []).forEach(a => {
-        if (a.pin && a.pin === _loginBuffer) {
-          found = a; foundYear = y; foundComision = c;
-        }
-      })
-    ));
-    if (found) {
-      _loginBuffer = '';
-      _loginUpdateDots();
-      errEl.style.display = 'none';
-      document.getElementById('loginScreen').style.display = 'none';
-      renderStudentView(found, foundYear, foundComision);
-    } else {
-      _loginError('PIN incorrecto — consultá a tu docente');
-    }
+    _loginError('PIN incorrecto — consultá a tu docente');
   }
 }
 
@@ -131,16 +160,16 @@ function exitStudentView() {
   loginSetMode('alumno');
 }
 
-// Fallback: show login screen after 1s if nothing else happened
+// Fallback: show login screen after 4s if Firebase hasn't responded
 window.addEventListener('load', () => {
   setTimeout(() => {
-    if (!window._appUnlocked) {
+    if (!window._appUnlocked && !window._fbReady) {
       const loading = document.getElementById('loadingScreen');
       if (loading) loading.style.display = 'none';
       const ls = document.getElementById('loginScreen');
       if (ls && ls.style.display === 'none') ls.style.display = 'flex';
     }
-  }, 1000);
+  }, 4000);
 });
 
 // Stub functions for any old references
@@ -922,17 +951,111 @@ select.input-field { cursor: pointer; }
 
 </style>
   <!-- Firebase -->
-  <script>
-// Firebase: desactivado — modo local PIN
-window.fbConfigured = false;
-window._fbUser = null;
-window._fbReady = true;
-window.fbSave = function() {};
-window.fbLogin = async function() {
-  document.getElementById('loginError').style.display = 'block';
-  document.getElementById('loginError').textContent = 'Firebase no disponible en modo local';
-};
-window.fbLogout = function() { showLoginScreen(); };
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script>
+(function() {
+  var firebaseConfig = {
+    apiKey: "AIzaSyAAMOYakN47-K1FPf3Gg4zItiyVOIoKkiA",
+    authDomain: "ttd---gestion.firebaseapp.com",
+    projectId: "ttd---gestion",
+    storageBucket: "ttd---gestion.firebasestorage.app",
+    messagingSenderId: "25052690107",
+    appId: "1:25052690107:web:6c2bc0fecc6a94f7f99b9e"
+  };
+
+  // Fallback si Firebase no carga (archivo local / sin internet)
+  function goOffline() {
+    window._fbReady = true;
+    window.fbConfigured = false;
+    var ls = document.getElementById('loadingScreen');
+    if (ls) ls.style.display = 'none';
+    if (typeof showLoginScreen === 'function') showLoginScreen();
+    else {
+      var el = document.getElementById('loginScreen');
+      if (el) el.style.display = 'flex';
+    }
+  }
+
+  if (typeof firebase === 'undefined') { goOffline(); return; }
+
+  try {
+    firebase.initializeApp(firebaseConfig);
+    var auth = firebase.auth();
+    var db   = firebase.firestore();
+    window.fbConfigured = true;
+
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+    auth.onAuthStateChanged(function(user) {
+      window._fbReady = true;
+      var ls = document.getElementById('loadingScreen');
+      if (ls) ls.style.display = 'none';
+
+      if (user) {
+        window._fbUser = user;
+        // Sync state from Firestore
+        db.collection('ttd').doc('state').get().then(function(snap) {
+          if (snap.exists) {
+            var remote = snap.data();
+            if (remote && typeof remote === 'object') {
+              // Merge into state carefully
+              try { Object.assign(state, remote); } catch(e) {}
+            }
+          }
+        }).catch(function(){});
+        // Live sync
+        db.collection('ttd').doc('state').onSnapshot(function(snap) {
+          if (!snap.exists) return;
+          try { Object.assign(state, snap.data()); } catch(e) {}
+        });
+        window._appUnlocked = true;
+        if (typeof unlockApp === 'function') unlockApp();
+      } else {
+        window._fbUser = null;
+        if (typeof showLoginScreen === 'function') showLoginScreen();
+        else {
+          var el = document.getElementById('loginScreen');
+          if (el) el.style.display = 'flex';
+        }
+      }
+    });
+
+    window.fbSave = function(data) {
+      if (!window._fbUser) return;
+      db.collection('ttd').doc('state').set(data).catch(function(){});
+    };
+
+    window.fbLogout = function() {
+      auth.signOut().then(function() {
+        window._fbUser = null;
+        window._appUnlocked = false;
+        if (typeof showLoginScreen === 'function') showLoginScreen();
+      });
+    };
+
+    // fbLogin called from docente panel
+    window.fbDoLogin = async function(email, pass) {
+      try {
+        await auth.signInWithEmailAndPassword(email, pass);
+        // onAuthStateChanged handles the rest
+        return null; // no error
+      } catch(e) {
+        if (e.code === 'auth/invalid-credential' ||
+            e.code === 'auth/wrong-password' ||
+            e.code === 'auth/user-not-found') return 'Email o contraseña incorrectos';
+        if (e.code === 'auth/too-many-requests') return 'Demasiados intentos, esperá un momento';
+        if (e.code === 'auth/network-request-failed') return 'Sin conexión a internet';
+        return 'Error al ingresar (' + e.code + ')';
+      }
+    };
+
+  } catch(e) {
+    console.warn('Firebase error:', e);
+    goOffline();
+  }
+})();
 </script>
 
 </head>
@@ -964,30 +1087,51 @@ window.fbLogout = function() { showLoginScreen(); };
     <button class="pin-mode-btn" id="loginTabDocente" onclick="loginSetMode('docente')">Docente</button>
   </div>
 
-  <div id="loginHint" style="font-family:'DM Mono','Courier New',monospace;font-size:11px;color:var(--text3);margin-bottom:16px;text-align:center">Ingresá tu PIN de 4 dígitos</div>
-
-  <div class="pin-dots" id="loginDots">
-    <div class="pin-dot" id="ld0"></div>
-    <div class="pin-dot" id="ld1"></div>
-    <div class="pin-dot" id="ld2"></div>
-    <div class="pin-dot" id="ld3"></div>
+  <!-- Panel alumno: PIN numérico -->
+  <div id="loginPanelAlumno">
+    <div id="loginHint" style="font-family:'DM Mono','Courier New',monospace;font-size:11px;color:var(--text3);margin-bottom:16px;text-align:center">Ingresá tu PIN de 4 dígitos</div>
+    <div class="pin-dots" id="loginDots">
+      <div class="pin-dot" id="ld0"></div>
+      <div class="pin-dot" id="ld1"></div>
+      <div class="pin-dot" id="ld2"></div>
+      <div class="pin-dot" id="ld3"></div>
+    </div>
+    <div class="pin-grid" style="margin-top:4px">
+      <button class="pin-btn" onclick="loginPress('1')">1</button>
+      <button class="pin-btn" onclick="loginPress('2')">2</button>
+      <button class="pin-btn" onclick="loginPress('3')">3</button>
+      <button class="pin-btn" onclick="loginPress('4')">4</button>
+      <button class="pin-btn" onclick="loginPress('5')">5</button>
+      <button class="pin-btn" onclick="loginPress('6')">6</button>
+      <button class="pin-btn" onclick="loginPress('7')">7</button>
+      <button class="pin-btn" onclick="loginPress('8')">8</button>
+      <button class="pin-btn" onclick="loginPress('9')">9</button>
+      <button class="pin-btn special" onclick="loginBack()">&#x232B;</button>
+      <button class="pin-btn" onclick="loginPress('0')">0</button>
+      <button class="pin-btn special" onclick="loginClear()">C</button>
+    </div>
   </div>
 
-  <div class="pin-grid" style="margin-top:4px">
-    <button class="pin-btn" onclick="loginPress('1')">1</button>
-    <button class="pin-btn" onclick="loginPress('2')">2</button>
-    <button class="pin-btn" onclick="loginPress('3')">3</button>
-    <button class="pin-btn" onclick="loginPress('4')">4</button>
-    <button class="pin-btn" onclick="loginPress('5')">5</button>
-    <button class="pin-btn" onclick="loginPress('6')">6</button>
-    <button class="pin-btn" onclick="loginPress('7')">7</button>
-    <button class="pin-btn" onclick="loginPress('8')">8</button>
-    <button class="pin-btn" onclick="loginPress('9')">9</button>
-    <button class="pin-btn special" onclick="loginBack()">&#x232B;</button>
-    <button class="pin-btn" onclick="loginPress('0')">0</button>
-    <button class="pin-btn special" onclick="loginClear()">C</button>
+  <!-- Panel docente: email + contraseña -->
+  <div id="loginPanelDocente" style="display:none;width:100%;max-width:300px">
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="loginEmail" type="email" placeholder="Email" autocomplete="email"
+        style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box"
+        onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()"/>
+      <input id="loginPass" type="password" placeholder="Contraseña" autocomplete="current-password"
+        style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box"
+        onkeydown="if(event.key==='Enter')docenteLogin()"/>
+      <button id="loginDocenteBtn" onclick="docenteLogin()"
+        style="width:100%;padding:13px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:'Bebas Neue','Arial Black',sans-serif;font-size:18px;letter-spacing:1.5px;cursor:pointer">
+        Ingresar
+      </button>
+      <div style="font-family:'DM Mono','Courier New',monospace;font-size:10px;color:var(--text3);text-align:center;margin-top:4px">
+        Sin conexión: PIN local 1234
+      </div>
+    </div>
   </div>
-  <div id="loginError" style="margin-top:14px;font-size:12px;color:var(--ausente);font-family:'DM Mono','Courier New',monospace;display:none;text-align:center">PIN incorrecto</div>
+
+  <div id="loginError" style="margin-top:14px;font-size:12px;color:var(--ausente);font-family:'DM Mono','Courier New',monospace;display:none;text-align:center;max-width:280px">PIN incorrecto</div>
 </div>
 
 <div id="pinScreen" style="display:none"><!-- retired --></div>
@@ -1271,17 +1415,7 @@ function updatePinDots() {
 function pinChangeMode() {
   document.getElementById('pinHint').textContent = 'Cambiá el PIN desde  Configuración luego de ingresar.';
 }
-function unlockApp() {
-  window._appUnlocked = true;
-  ['pinScreen','fbLoginScreen','loadingScreen'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.style.display = 'none';
-  });
-  document.getElementById('mainHeader').style.display = 'flex';
-  loadSampleData();
-  renderYears();
-  showViewDirect('view-years');
-}
+// unlockApp defined in login script above
 function changePin() {
   const p1 = document.getElementById('newPin1').value;
   const p2 = document.getElementById('newPin2').value;
@@ -1326,8 +1460,13 @@ function updateHeader() {
   const current = navStack[navStack.length-1];
   if (!navStack.length || navStack.length===1) {
     back.style.display='none';
-    bc.textContent = current === 'view-programa' ? 'Programa' : current === 'view-config' ? 'Configuración' : 'Inicio';
+    if (current === 'view-transversal') bc.textContent = 'Ejercicio Transversal';
+    else if (current === 'view-programa') bc.textContent = 'Programa';
+    else if (current === 'view-config') bc.textContent = 'Configuración';
+    else bc.textContent = 'Inicio';
   } else if (navStack.length === 2) {
+    if (current === 'view-transversal') { back.style.display='flex'; bc.textContent = 'Ejercicio Transversal'; }
+    else
     back.style.display='flex';
     bc.textContent = currentYear?.label||'';
   } else {
@@ -1764,10 +1903,10 @@ function renderNotas() {
   const trabajos = getTrabajos();
   cont.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:8px;flex-wrap:wrap">
-      <div style="display:flex;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
-        <button class="nst-btn ${notasModo==='por-alumno'?'active':''}" style="padding:7px 10px;font-size:11px" onclick="setNotasModo('por-alumno')">Por alumno</button>
-        <button class="nst-btn ${notasModo==='por-trabajo'?'active':''}" style="padding:7px 10px;font-size:11px" onclick="setNotasModo('por-trabajo')">Por trabajo</button>
-        <button class="nst-btn ${notasModo==='por-grupo'?'active':''}" style="padding:7px 10px;font-size:11px" onclick="setNotasModo('por-grupo')">Por grupo</button>
+      <div style="display:flex;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);">
+        <button class="nst-btn ${notasModo==='por-alumno'?'active':''}" data-modo="por-alumno" style="padding:7px 10px;font-size:11px" onclick="setNotasModo('por-alumno')">Por alumno</button>
+        <button class="nst-btn ${notasModo==='por-trabajo'?'active':''}" data-modo="por-trabajo" style="padding:7px 10px;font-size:11px" onclick="setNotasModo('por-trabajo')">Por trabajo</button>
+        <button class="nst-btn ${notasModo==='por-grupo'?'active':''}" data-modo="por-grupo" style="padding:7px 10px;font-size:11px" onclick="setNotasModo('por-grupo')">Por grupo</button>
       </div>
       <button onclick="showGestionTrabajos()" style="background:none;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;font-size:11px;font-family:'DM Mono',monospace;color:var(--text2);cursor:pointer">Editar trabajos</button>
     </div>
@@ -1785,6 +1924,10 @@ function setNotasModo(modo) {
       notasTrabajoActivo = filtered[0]?.id || null;
     }
   }
+  // Update mode button active states directly
+  document.querySelectorAll('#notasList .nst-btn[data-modo]').forEach(b => {
+    b.classList.toggle('active', b.dataset.modo === modo);
+  });
   renderNotasBody();
 }
 
@@ -1847,8 +1990,9 @@ function renderNotasPorGrupo(body) {
     ${trabajos.map(tw => `<button class="nst-btn ${notasTrabajoActivo===tw.id?'active':''}" style="padding:6px 10px;font-size:11px;white-space:nowrap" onclick="selectTrabajoTab('${tw.id}')">${tw.nombre}</button>`).join('')}
   </div>`;
   const driveHtml = t.drive ? `<a href="${t.drive}" target="_blank" style="display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);text-decoration:none;margin-bottom:12px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Ver en Drive</a>` : '';
-  const grupos = t.grupos || [];
-  if (!grupos.length) { body.innerHTML = tabs + '<div class="empty">Sin grupos para este trabajo. En "Editar trabajos" agregá grupos.</div>'; return; }
+  // Use comision grupos (no per-trabajo grupos needed)
+  const grupos = currentComision.grupos || [];
+  if (!grupos.length) { body.innerHTML = tabs + '<div class="empty">Sin grupos en esta comisión. Creálos en la tab Grupos.</div>'; return; }
   const grupoCards = grupos.map(g => {
     const firstMember = (g.miembros||[])[0];
     const notaGrupal = firstMember ? getNota(firstMember, t.id) : null;
@@ -1889,7 +2033,7 @@ function openGrupoNotaModal(grupoId, trabajoId) {
   _grupoNotaModal_gid = grupoId;
   _grupoNotaModal_tid = trabajoId;
   const t = getTrabajos().find(x => x.id === trabajoId);
-  const g = (t ? t.grupos || [] : []).find(x => x.id === grupoId);
+  const g = (currentComision ? currentComision.grupos || [] : []).find(x => x.id === grupoId);
   const firstMember = g && g.miembros && g.miembros[0];
   const n = firstMember ? getNota(firstMember, trabajoId) : null;
   const chips = (state.notaSistema === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
@@ -1934,7 +2078,7 @@ let _grupoNotaModal_gid = null, _grupoNotaModal_tid = null;
 
 function confirmNotaGrupal(valor) {
   const t = getTrabajos().find(x => x.id === _grupoNotaModal_tid);
-  const g = (t ? t.grupos || [] : []).find(x => x.id === _grupoNotaModal_gid);
+  const g = (currentComision ? currentComision.grupos || [] : []).find(x => x.id === _grupoNotaModal_gid);
   if (g && g.miembros) g.miembros.forEach(aid => setNota(aid, _grupoNotaModal_tid, valor));
   closeModalById('modalNota');
   renderNotasBody();
@@ -1944,22 +2088,7 @@ function confirmNotaGrupal(valor) {
 
 function showGestionTrabajos() {
   const trabajos = getTrabajos();
-  const alumnos = sortedAlumnos();
   const items = trabajos.map((t,i) => {
-    const grupos = t.grupos||[];
-    const grupoHtml = t.tipo==='grupal' ? `
-      <div style="margin-top:8px">
-        <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Grupos</div>
-        ${grupos.map(g => {
-          const memberNames = (g.miembros||[]).map(aid => { const a=alumnos.find(x=>x.id===aid); return a?displayName(a):''; }).filter(Boolean).join(', ');
-          return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px">
-            <span style="flex:1;color:var(--text2)">${g.nombre}: <span style="color:var(--text3);font-size:11px">${memberNames||'Sin miembros'}</span></span>
-            <button onclick="editGrupoTrabajo('${t.id}','${g.id}')" style="background:none;border:none;color:var(--ttd);font-size:11px;cursor:pointer;font-family:'DM Mono',monospace">Editar</button>
-            <button onclick="delGrupoTrabajo('${t.id}','${g.id}')" style="background:none;border:none;color:var(--ausente);font-size:14px;cursor:pointer">×</button>
-          </div>`;
-        }).join('')}
-        <button onclick="addGrupoTrabajo('${t.id}')" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);background:none;border:none;cursor:pointer;padding:4px 0">+ Agregar grupo</button>
-      </div>` : '';
     return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <input value="${t.nombre}" onchange="renameTrabajoInline('${t.id}',this.value)" style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:6px 10px;font-size:13px;color:var(--text)"/>
@@ -1972,16 +2101,16 @@ function showGestionTrabajos() {
         <button onclick="deleteTrabajo('${t.id}')" style="background:none;border:none;color:var(--ausente);font-size:18px;cursor:pointer">×</button>
       </div>
       <input value="${t.drive||''}" placeholder="Link de Google Drive (opcional)" onchange="setTrabajoDrive('${t.id}',this.value)" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:6px 10px;font-size:11px;color:var(--text);font-family:'DM Mono',monospace"/>
-      ${grupoHtml}
     </div>`;
   }).join('');
   openModalRaw('modalGestionTrabajos', `
-    <div class="modal-title">Trabajos \u2014 ${currentYear?.label}</div>
+    <div class="modal-title">Trabajos — ${currentYear?.label}</div>
     <div id="trabajosList" style="max-height:60vh;overflow-y:auto">${items}</div>
     <button onclick="addTrabajo()" style="width:100%;margin-top:10px;padding:10px;background:none;border:1.5px dashed var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:12px;color:var(--ttd);cursor:pointer">+ Agregar trabajo</button>
     <button onclick="closeModalById('modalGestionTrabajos');renderNotas();" style="width:100%;margin-top:8px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Listo</button>
   `);
 }
+
 
 function renameTrabajoInline(id,nombre){const t=getTrabajos().find(x=>x.id===id);if(t){t.nombre=nombre;save();}}
 function setTrabajoTipo(id,tipo){const t=getTrabajos().find(x=>x.id===id);if(t){t.tipo=tipo;save();showGestionTrabajos();}}
@@ -2061,13 +2190,48 @@ function renderGrupos() {
       card.innerHTML = `
         <div class="grupo-header">
           <div class="grupo-name">${g.nombre}</div>
-          <button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px" onclick="delGrupo('${g.id}')">×</button>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button style="background:none;border:none;color:var(--ttd);font-size:12px;font-family:'DM Mono',monospace;cursor:pointer" onclick="editGrupo('${g.id}')">Editar</button>
+            <button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px;line-height:1" onclick="delGrupo('${g.id}')">×</button>
+          </div>
         </div>
         <div class="grupo-members">${members||'<span style="font-size:12px;color:var(--text3)">Sin miembros</span>'}</div>
       `;
       list.appendChild(card);
     });
   }
+}
+
+function editGrupo(id) {
+  const g = currentComision.grupos.find(x => x.id === id);
+  if (!g) return;
+  const alumnos = sortedAlumnos();
+  openModalRaw('modalGrupo', `
+    <div class="modal-title">Editar grupo</div>
+    <input id="editGrupoNombre" value="${g.nombre}" style="width:100%;margin:10px 0 16px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-size:14px;color:var(--text)"/>
+    <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:4px">
+      ${alumnos.map(a => `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border)">
+        <input type="checkbox" id="eg_${a.id}" ${(g.miembros||[]).includes(a.id)?'checked':''} style="accent-color:var(--ttd);width:16px;height:16px">
+        <label for="eg_${a.id}" style="font-size:13px;cursor:pointer">${displayName(a)}</label>
+      </div>`).join('')}
+    </div>
+    <button onclick="confirmEditGrupo('${id}')" style="width:100%;margin-top:12px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Guardar</button>
+  `);
+  document.getElementById('modalGrupo').classList.add('open');
+}
+
+function confirmEditGrupo(id) {
+  const g = currentComision.grupos.find(x => x.id === id);
+  if (!g) return;
+  const nombre = document.getElementById('editGrupoNombre')?.value.trim();
+  if (nombre) g.nombre = nombre;
+  g.miembros = sortedAlumnos()
+    .filter(a => document.getElementById('eg_'+a.id)?.checked)
+    .map(a => a.id);
+  save();
+  closeModalById('modalGrupo');
+  renderGrupos();
+  toast('Grupo actualizado');
 }
 
 function showAddGrupo() {
@@ -2105,10 +2269,11 @@ function delGrupo(id) {
 // }
 
 function openTransversal() {
+  navStack = ['view-years', 'view-transversal'];
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById('view-transversal').classList.add('active');
-  navStack.push('transversal');
   renderTransversal();
+  updateHeader();
 }
 
 function getAllAlumnos() {
@@ -2258,7 +2423,10 @@ function confirmGrupoTx() {
   } else {
     state.transversal.grupos.push({id:'txg'+Date.now(), nombre, docentes, miembros});
   }
-  save(); closeModalById('modalGestionTrabajos'); renderTransversal();
+  save();
+  const _ov = document.getElementById('modalGestionTrabajos');
+  if (_ov) _ov.classList.remove('open');
+  renderTransversal();
   toast(_editingGrupoTxId ? 'Grupo actualizado' : 'Grupo creado');
 }
 
@@ -2341,21 +2509,23 @@ function importGruposTxFromExcel(input) {
 function showNotasTx() {
   const tx = state.transversal;
   if (!tx.trabajos) tx.trabajos = [];
+  // Auto-populate from year trabajos
+  state.years.forEach(y => (y.trabajos||[]).forEach(t => {
+    if (!tx.trabajos.find(x => x.nombre === t.nombre))
+      tx.trabajos.push({id:'ttw'+Date.now()+Math.random(), nombre:t.nombre, notas:{}});
+  }));
+  if (!tx.trabajos.length) tx.trabajos.push({id:'ttw'+Date.now(), nombre:'TP 1', notas:{}});
   const trabajos = tx.trabajos;
-  const grupos = tx.grupos || [];
-
   openModalRaw('modalGestionTrabajos', `
     <div class="modal-title">Notas — Ejercicio Transversal</div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-      ${trabajos.map((t,i) => `<button class="nst-btn ${i===0?'active':''}" onclick="renderNotasTxBody('${t.id}',this)" style="padding:6px 10px;font-size:11px">${t.nombre}</button>`).join('')}
-      <button onclick="addTrabajoTx()" style="background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:11px;color:var(--ttd);cursor:pointer;font-family:'DM Mono',monospace">+ Trabajo</button>
+    <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;flex-wrap:wrap">
+      ${trabajos.map((t,i) => `<button class="nst-btn ${i===0?'active':''}" style="padding:6px 10px;font-size:11px;white-space:nowrap" onclick="renderNotasTxBody('${t.id}',this)">${t.nombre}</button>`).join('')}
     </div>
-    <div id="notasTxBody">
-      ${trabajos.length ? '' : '<div class="empty">Creá un trabajo para asignar notas.</div>'}
-    </div>
+    <div id="notasTxBody"></div>
   `);
   if (trabajos.length) renderNotasTxBody(trabajos[0].id, null);
 }
+
 
 function addTrabajoTx() {
   const nombre = prompt('Nombre del trabajo:');
@@ -2668,7 +2838,7 @@ function renderHistorial(){
     const p=vals.filter(v=>v==='P').length,au=vals.filter(v=>v==='A').length,t=vals.filter(v=>v==='T').length;
     const card=document.createElement('div');card.className='historial-card';
     const ds=new Date(fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short'});
-    card.innerHTML=`<div class="historial-header" onclick="this.nextElementSibling.classList.toggle('open')"><span class="historial-date">${ds}</span><div class="historial-stats">${p?`<span class="stat-pill p">${p}P</span>`:''} ${t?`<span class="stat-pill t">${t}T</span>`:''} ${au?`<span class="stat-pill a">${au}A</span>`:''}</div></div><div class="historial-body">${sortedAlumnos().map(al=>{const est=reg[al.id]||'—';const cls=est==='P'?'presente':est==='A'?'ausente':est==='T'?'tardanza':'';const lbl=est==='P'?'Presente':est==='A'?'Ausente':est==='T'?'Tardanza':'Sin registro';return`<div style="display:flex;align-items:center;justify-content:space-between;font-size:13px"><span><span class="status-dot ${cls}"></span>${displayName(al)}</span><span style="color:var(--text3);font-size:12px">${lbl}</span></div>`;}).join('')}</div>`;
+    card.innerHTML=`<div class="historial-header" onclick="this.nextElementSibling.classList.toggle('open')"><span class="historial-date">${ds}</span><div class="historial-stats">${p?`<span class="stat-pill p">${p}P</span>`:''} ${t?`<span class="stat-pill t">${t}T</span>`:''} ${au?`<span class="stat-pill a">${au}A</span>`:''}</div></div><div class="historial-body">${sortedAlumnos().map(al=>{const est=reg[al.id]||'—';const cls=est==='P'?'presente':est==='A'?'ausente':est==='T'?'tardanza':'';const lbl=est==='P'?'Presente':est==='A'?'Ausente':est==='T'?'Tarde':'Sin registro';return`<div style="display:flex;align-items:center;justify-content:space-between;font-size:13px"><span><span class="status-dot ${cls}"></span>${displayName(al)}</span><span style="color:var(--text3);font-size:12px">${lbl}</span></div>`;}).join('')}</div>`;
     list.appendChild(card);
   });
 }
@@ -2680,7 +2850,7 @@ function renderResumen(){
   const asist=currentComision.asistencias||{},notas=currentComision.notas||{};
   const fechas=Object.keys(asist);let tp=0,ta=0,tt=0;
   fechas.forEach(f=>{Object.values(asist[f]).forEach(v=>{if(v==='P')tp++;else if(v==='A')ta++;else if(v==='T')tt++;});});
-  document.getElementById('resumenGrid').innerHTML=`<div class="resumen-card"><div class="resumen-num" style="color:var(--presente)">${tp}</div><div class="resumen-label">Presentes</div></div><div class="resumen-card"><div class="resumen-num" style="color:var(--tardanza)">${tt}</div><div class="resumen-label">Tardanzas</div></div><div class="resumen-card"><div class="resumen-num" style="color:var(--ausente)">${ta}</div><div class="resumen-label">Ausentes</div></div>`;
+  document.getElementById('resumenGrid').innerHTML=`<div class="resumen-card"><div class="resumen-num" style="color:var(--presente)">${tp}</div><div class="resumen-label">Presentes</div></div><div class="resumen-card"><div class="resumen-num" style="color:var(--tardanza)">${tt}</div><div class="resumen-label">Tardes</div></div><div class="resumen-card"><div class="resumen-num" style="color:var(--ausente)">${ta}</div><div class="resumen-label">Ausentes</div></div>`;
   renderChart(fechas,asist);
   renderRanking(notas);
   renderResumenTable(fechas,asist,notas);
@@ -3036,7 +3206,7 @@ function renderStudentView(alumno, year, comision) {
     const v = (asist[f]||{})[alumno.id];
     if (!v) return '';
     const dateStr = new Date(f+'T12:00:00').toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short'});
-    const label = v==='P'?'Presente':v==='A'?'Ausente':'Tardanza';
+    const label = v==='P'?'Presente':v==='A'?'Ausente':'Tarde';
     const cls = v==='P'?'asist-p':v==='A'?'asist-a':'asist-t';
     return `<div class="student-asist-row">
       <span class="student-asist-fecha">${dateStr}</span>
@@ -3100,7 +3270,7 @@ function renderStudentView(alumno, year, comision) {
         </div>
         <div class="student-stat">
           <div class="student-stat-num" style="color:var(--tardanza)">${t}</div>
-          <div class="student-stat-label">Tardanzas</div>
+          <div class="student-stat-label">Tardes</div>
         </div>
         <div class="student-stat">
           <div class="student-stat-num" style="color:var(--ausente)">${a}</div>
@@ -3161,20 +3331,9 @@ function renderStudentView(alumno, year, comision) {
   document.getElementById('pinScreen').style.display = 'none';
 }
 
-function fbLogoutAndReset() {
-  if (window.fbLogout) window.fbLogout();
-  document.getElementById('mainHeader').style.display = 'none';
-  document.getElementById('fbLoginScreen').style.display = 'flex';
-  // hide all views
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-}
+function fbLogoutAndReset() { showLoginScreen(); }
 
-function exitStudentView() {
-  document.getElementById('studentScreen').classList.remove('open');
-  document.getElementById('pinScreen').style.display = 'flex';
-  estBuffer = ''; updateEstDots();
-  setPinMode('docente');
-}
+// exitStudentView defined in login script
 
 
 // ── Firebase config check on load ──────────────────────
