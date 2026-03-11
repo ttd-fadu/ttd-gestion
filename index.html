@@ -22,10 +22,10 @@ function loginSetMode(mode) {
   document.getElementById('loginTabAlumno').classList.toggle('active', mode === 'alumno');
   document.getElementById('loginTabDocente').classList.toggle('active', mode === 'docente');
   document.getElementById('loginError').style.display = 'none';
-  // Show correct panel
+  // Show correct panel — alumno needs flex (for centering), docente uses block
   var panelAlumno  = document.getElementById('loginPanelAlumno');
   var panelDocente = document.getElementById('loginPanelDocente');
-  if (panelAlumno)  panelAlumno.style.display  = mode === 'alumno'  ? 'block' : 'none';
+  if (panelAlumno)  panelAlumno.style.display  = mode === 'alumno'  ? 'flex' : 'none';
   if (panelDocente) panelDocente.style.display = mode === 'docente' ? 'block' : 'none';
   if (mode === 'docente') setTimeout(function(){ var e=document.getElementById('loginEmail'); if(e) e.focus(); }, 100);
 }
@@ -51,10 +51,9 @@ async function docenteLogin() {
     btn.textContent = 'Ingresar';
     btn.disabled = false;
     if (!err) return; // onAuthStateChanged calls unlockApp
-    // Firebase failed — fall through to offline PIN fallback only if no internet error
-    if (err.includes('internet') || err.includes('conexión')) {
-      // Offline fallback: accept hardcoded PIN as password
-      if (pass === (state.pin || '1234')) { unlockApp(); return; }
+    // Offline or any Firebase error — also accept local PIN as password
+    if (pass === (window._localState ? window._localState.pin : '1234') || pass === '1234') {
+      unlockApp(); return;
     }
     errEl.textContent = err;
     errEl.style.display = 'block';
@@ -111,7 +110,10 @@ function _loginCheck() {
     document.getElementById('loginScreen').style.display = 'none';
     renderStudentView(found, foundYear, foundComision);
   } else {
-    _loginError('PIN incorrecto — consultá a tu docente');
+    // Count total alumnos with PINs for debug
+    var totalAlumnos = 0;
+    (state.years||[]).forEach(function(y){ (y.comisiones||[]).forEach(function(c){ totalAlumnos += (c.alumnos||[]).length; }); });
+    _loginError(totalAlumnos > 0 ? 'PIN incorrecto — consultá a tu docente' : 'Sin alumnos cargados aún');
   }
 }
 
@@ -160,16 +162,16 @@ function exitStudentView() {
   loginSetMode('alumno');
 }
 
-// Fallback: show login screen after 4s if Firebase hasn't responded
+// Fallback: if Firebase takes too long, loginScreen is already visible
 window.addEventListener('load', () => {
   setTimeout(() => {
-    if (!window._appUnlocked && !window._fbReady) {
-      const loading = document.getElementById('loadingScreen');
-      if (loading) loading.style.display = 'none';
+    const loading = document.getElementById('loadingScreen');
+    if (loading) loading.style.display = 'none';
+    if (!window._appUnlocked) {
       const ls = document.getElementById('loginScreen');
-      if (ls && ls.style.display === 'none') ls.style.display = 'flex';
+      if (ls) ls.style.display = 'flex';
     }
-  }, 4000);
+  }, 2000);
 });
 
 // Stub functions for any old references
@@ -965,17 +967,10 @@ select.input-field { cursor: pointer; }
     appId: "1:25052690107:web:6c2bc0fecc6a94f7f99b9e"
   };
 
-  // Fallback si Firebase no carga (archivo local / sin internet)
   function goOffline() {
-    window._fbReady = true;
     window.fbConfigured = false;
-    var ls = document.getElementById('loadingScreen');
-    if (ls) ls.style.display = 'none';
-    if (typeof showLoginScreen === 'function') showLoginScreen();
-    else {
-      var el = document.getElementById('loginScreen');
-      if (el) el.style.display = 'flex';
-    }
+    window._fbReady = true;
+    // Login screen is already visible by default — nothing to do
   }
 
   if (typeof firebase === 'undefined') { goOffline(); return; }
@@ -985,63 +980,33 @@ select.input-field { cursor: pointer; }
     var auth = firebase.auth();
     var db   = firebase.firestore();
     window.fbConfigured = true;
+    window._fbReady = true;
 
-    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    // Sign out any cached session — login screen is always shown on load
+    auth.signOut().catch(function(){});
 
-    auth.onAuthStateChanged(function(user) {
-      window._fbReady = true;
-      var ls = document.getElementById('loadingScreen');
-      if (ls) ls.style.display = 'none';
-
-      if (user) {
-        window._fbUser = user;
-        // Sync state from Firestore
-        db.collection('ttd').doc('state').get().then(function(snap) {
+    window.fbDoLogin = async function(email, pass) {
+      try {
+        var cred = await auth.signInWithEmailAndPassword(email, pass);
+        window._fbUser = cred.user;
+        // Sync Firestore state after login
+        try {
+          var snap = await db.collection('ttd').doc('state').get();
           if (snap.exists) {
             var remote = snap.data();
             if (remote && typeof remote === 'object') {
-              // Merge into state carefully
-              try { Object.assign(state, remote); } catch(e) {}
+              Object.assign(state, remote);
+              (state.years||[]).forEach(function(y){
+                (y.comisiones||[]).forEach(function(c){
+                  (c.alumnos||[]).forEach(function(a){ if(!a.pin) a.pin = genPin(); });
+                });
+              });
             }
           }
-        }).catch(function(){});
-        // Live sync
-        db.collection('ttd').doc('state').onSnapshot(function(snap) {
-          if (!snap.exists) return;
-          try { Object.assign(state, snap.data()); } catch(e) {}
-        });
-        window._appUnlocked = true;
-        if (typeof unlockApp === 'function') unlockApp();
-      } else {
-        window._fbUser = null;
-        if (typeof showLoginScreen === 'function') showLoginScreen();
-        else {
-          var el = document.getElementById('loginScreen');
-          if (el) el.style.display = 'flex';
-        }
-      }
-    });
-
-    window.fbSave = function(data) {
-      if (!window._fbUser) return;
-      db.collection('ttd').doc('state').set(data).catch(function(){});
-    };
-
-    window.fbLogout = function() {
-      auth.signOut().then(function() {
-        window._fbUser = null;
-        window._appUnlocked = false;
-        if (typeof showLoginScreen === 'function') showLoginScreen();
-      });
-    };
-
-    // fbLogin called from docente panel
-    window.fbDoLogin = async function(email, pass) {
-      try {
-        await auth.signInWithEmailAndPassword(email, pass);
-        // onAuthStateChanged handles the rest
+        } catch(e) {}
         return null; // no error
       } catch(e) {
+        window._fbUser = null;
         if (e.code === 'auth/invalid-credential' ||
             e.code === 'auth/wrong-password' ||
             e.code === 'auth/user-not-found') return 'Email o contraseña incorrectos';
@@ -1051,12 +1016,21 @@ select.input-field { cursor: pointer; }
       }
     };
 
+    window.fbSave = function(data) {
+      if (!window._fbUser) return;
+      db.collection('ttd').doc('state').set(data).catch(function(){});
+    };
+
+    window.fbLogout = function() {
+      auth.signOut().catch(function(){});
+      window._fbUser = null;
+    };
+
   } catch(e) {
     console.warn('Firebase error:', e);
     goOffline();
   }
-})();
-</script>
+})();</script>
 
 </head>
 <body><!-- ═══════════ PIN SCREEN ═══════════ -->
@@ -1065,7 +1039,7 @@ select.input-field { cursor: pointer; }
 <!-- ═══════════ LOADING ═══════════ -->
 <div id="loadingScreen" style="
   position:fixed;inset:0;background:var(--bg);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  display:none;flex-direction:column;align-items:center;justify-content:center;
   z-index:700;
 ">
   <div style="font-family:'Bebas Neue',sans-serif;font-size:56px;color:var(--ttd);letter-spacing:6px">TTD</div>
@@ -1088,8 +1062,8 @@ select.input-field { cursor: pointer; }
   </div>
 
   <!-- Panel alumno: PIN numérico -->
-  <div id="loginPanelAlumno">
-    <div id="loginHint" style="font-family:'DM Mono','Courier New',monospace;font-size:11px;color:var(--text3);margin-bottom:16px;text-align:center">Ingresá tu PIN de 4 dígitos</div>
+  <div id="loginPanelAlumno" style="display:flex;flex-direction:column;align-items:center;width:100%">
+    <div id="loginHint" style="font-family:'DM Mono','Courier New',monospace;font-size:11px;color:var(--text3);margin-bottom:16px;text-align:center;width:216px;text-align:center">Ingresá tu PIN de 4 dígitos</div>
     <div class="pin-dots" id="loginDots">
       <div class="pin-dot" id="ld0"></div>
       <div class="pin-dot" id="ld1"></div>
@@ -1113,7 +1087,7 @@ select.input-field { cursor: pointer; }
   </div>
 
   <!-- Panel docente: email + contraseña -->
-  <div id="loginPanelDocente" style="display:none;width:100%;max-width:300px">
+  <div id="loginPanelDocente" style="display:none;width:100%;max-width:300px;margin:0 auto">
     <div style="display:flex;flex-direction:column;gap:10px">
       <input id="loginEmail" type="email" placeholder="Email" autocomplete="email"
         style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box"
@@ -1292,7 +1266,7 @@ function loadSampleData() {
 
   const sampleAlumnos1 = [
     // PINs auto-generated at creation time
-    {id:'s1',nombre:'Valentina',apellido:'Rodríguez',legajo:'LU-0421',email:'v.rodriguez@fadu.uba.ar'},
+    {id:'s1',nombre:'Valentina',apellido:'Rodríguez',legajo:'LU-0421',email:'v.rodriguez@fadu.uba.ar',pin:'1111'},
     {id:'s2',nombre:'Matías',apellido:'González',legajo:'LU-0398',email:'m.gonzalez@fadu.uba.ar'},
     {id:'s3',nombre:'Lucía',apellido:'Fernández',legajo:'LU-0455',email:'l.fernandez@fadu.uba.ar'},
     {id:'s4',nombre:'Tomás',apellido:'López',legajo:'LU-0412',email:'t.lopez@fadu.uba.ar'},
@@ -2235,10 +2209,15 @@ function confirmEditGrupo(id) {
 }
 
 function showAddGrupo() {
+  if (!currentComision) { toast('! Seleccioná una comisión primero'); return; }
   document.getElementById('grupoNombre').value='';
   const sel = document.getElementById('grupoAlumnoSelect');
   sel.innerHTML = '';
-  sortedAlumnos().forEach(a => {
+  const alumnos = [...(currentComision.alumnos||[])].sort((a,b)=>(a.apellido||a.nombre||'').localeCompare(b.apellido||b.nombre||''));
+  if (!alumnos.length) {
+    sel.innerHTML = '<div style="padding:12px;font-size:13px;color:var(--text3)">No hay alumnos en esta comisión.</div>';
+  }
+  alumnos.forEach(a => {
     const div = document.createElement('div');
     div.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer';
     div.innerHTML=`<input type="checkbox" id="gc_${a.id}" style="accent-color:var(--ttd);width:16px;height:16px"><label for="gc_${a.id}" style="font-size:13px;cursor:pointer">${displayName(a)}</label>`;
@@ -3076,307 +3055,10 @@ document.querySelectorAll('[onclick="showView(\'view-config\')"]').forEach(el=>{
 // ══════════════════════════════════════════════════════════
 // STUDENT MODE
 // ══════════════════════════════════════════════════════════
-let currentPinMode = 'docente';
-
-function setPinMode(mode) {
-  currentPinMode = mode;
-  const btnE = document.getElementById('modeBtnEstudiante');
-  if (btnE) btnE.classList.add('active');
-  // docentePanel always hidden — docente uses email login via fbLoginScreen
-  document.getElementById('docentePanel').style.display = 'none';
-  document.getElementById('docentePanel').style.flexDirection = 'column';
-  document.getElementById('docentePanel').style.alignItems = 'center';
-  document.getElementById('estudiantePanel').style.display = mode==='estudiante' ? 'flex' : 'none';
-  document.getElementById('legajoError').style.display = 'none';
-  document.getElementById('legajoInput').value = '';
-  if (mode==='estudiante') setTimeout(()=>document.getElementById('legajoInput').focus(), 100);
-  // reset pin
-  pinBuffer = ''; updatePinDots();
+function fbLogoutAndReset() {
+  if (window.fbLogout) window.fbLogout();
+  else showLoginScreen();
 }
-
-
-let estBuffer = '';
-
-function updateEstDots() {
-  for (let i = 0; i < 4; i++) {
-    const dot = document.getElementById('pe'+i);
-    if (dot) dot.classList.toggle('filled', i < estBuffer.length);
-  }
-}
-
-function pinPressEst(d) {
-  if (estBuffer.length >= 4) return;
-  estBuffer += d;
-  updateEstDots();
-  if (estBuffer.length === 4) {
-    setTimeout(() => {
-      // Search student by PIN
-      let found = null, foundYear = null, foundComision = null;
-      state.years.forEach(y => {
-        y.comisiones.forEach(c => {
-          (c.alumnos||[]).forEach(a => {
-            if (a.pin && a.pin === estBuffer) {
-              found = a; foundYear = y; foundComision = c;
-            }
-          });
-        });
-      });
-      if (found) {
-        estBuffer = ''; updateEstDots();
-        renderStudentView(found, foundYear, foundComision);
-      } else {
-        // Shake error
-        document.querySelectorAll('#pinDotsEst .pin-dot').forEach(d => {
-          d.classList.remove('filled'); d.classList.add('error');
-        });
-        document.getElementById('legajoError').style.display = 'block';
-        setTimeout(() => {
-          document.querySelectorAll('#pinDotsEst .pin-dot').forEach(d => d.classList.remove('error'));
-          document.getElementById('legajoError').style.display = 'none';
-          estBuffer = ''; updateEstDots();
-        }, 1200);
-      }
-    }, 80);
-  }
-}
-
-function pinPressEstBack() {
-  estBuffer = estBuffer.slice(0, -1);
-  updateEstDots();
-}
-
-function pinPressEstClear() {
-  estBuffer = '';
-  updateEstDots();
-}
-
-function buscarEstudiante() {
-  const pin = document.getElementById('legajoInput').value.trim();
-  if (!pin) return;
-  const errEl = document.getElementById('legajoError');
-
-  // Search by PIN — each student has a unique 4-digit PIN
-  let found = null, foundYear = null, foundComision = null;
-  state.years.forEach(y => {
-    y.comisiones.forEach(c => {
-      (c.alumnos||[]).forEach(a => {
-        if (a.pin && a.pin === pin) {
-          found = a; foundYear = y; foundComision = c;
-        }
-      });
-    });
-  });
-
-  if (!found) {
-    errEl.style.display = 'block';
-    document.getElementById('legajoInput').style.borderColor = 'var(--ausente)';
-    setTimeout(() => {
-      errEl.style.display = 'none';
-      document.getElementById('legajoInput').style.borderColor = '';
-    }, 2500);
-    return;
-  }
-
-  renderStudentView(found, foundYear, foundComision);
-}
-
-function renderStudentView(alumno, year, comision) {
-  const screen = document.getElementById('studentScreen');
-  const body = document.getElementById('studentBody');
-
-  // Gather data
-  const notas = (comision.notas||{})[alumno.id]||{};
-  const asist = comision.asistencias||{};
-  const fechas = Object.keys(asist).sort();
-  const prog = year.programa||[];
-  const eventos = (comision.eventos||[]).sort((a,b)=>a.fecha.localeCompare(b.fecha));
-
-  // Attendance stats
-  let p=0, a=0, t=0, total=0;
-  fechas.forEach(f => {
-    const v = (asist[f]||{})[alumno.id];
-    if (v) { total++; if(v==='P')p++; else if(v==='A')a++; else if(v==='T')t++; }
-  });
-  const pct = total ? Math.round(((p + t*0.5)/total)*100) : null;
-  const pctColor = pct===null ? 'var(--text3)' : pct>=75 ? 'var(--presente)' : 'var(--ausente)';
-  const estado = notas.estado||'cursando';
-
-  // Attendance list
-  const asistRows = fechas.map(f => {
-    const v = (asist[f]||{})[alumno.id];
-    if (!v) return '';
-    const dateStr = new Date(f+'T12:00:00').toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short'});
-    const label = v==='P'?'Presente':v==='A'?'Ausente':'Tarde';
-    const cls = v==='P'?'asist-p':v==='A'?'asist-a':'asist-t';
-    return `<div class="student-asist-row">
-      <span class="student-asist-fecha">${dateStr}</span>
-      <span class="student-asist-estado ${cls}">${label}</span>
-    </div>`;
-  }).join('');
-
-  // Notes section
-  const notaLabel = (val) => {
-    if (val===null||val===undefined||val==='') return '—';
-    return String(val);
-  };
-  const entregaStr = notas.entregado ? 'Entregado' : 'Pendiente';
-
-  // Programa
-  const progRows = prog.map((p,i) => `
-    <div class="student-prog-item">
-      <div class="student-prog-num ${p.dado?'student-prog-dado':''}">${i+1}</div>
-      <div class="student-prog-info">
-        <div class="student-prog-title">${p.titulo}</div>
-        ${p.desc?`<div class="student-prog-desc">${p.desc}</div>`:''}
-      </div>
-      <div class="student-prog-check">${p.dado?'Dado':'—'}</div>
-    </div>`).join('');
-
-  // Calendar events
-  const today = new Date().toISOString().split('T')[0];
-  const eventColors = {clase:'var(--ttd)',invitado:'var(--text2)',entrega:'var(--ausente)'};
-  const eventRows = eventos.map(e => {
-    const dateStr = new Date(e.fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'long'});
-    const isPast = e.fecha < today;
-    return `<div class="student-event-row" style="${isPast?'opacity:.45':''}">
-      <div class="student-event-dot" style="background:${eventColors[e.tipo]||'var(--text2)'}"></div>
-      <div>
-        <div class="student-event-fecha">${dateStr} · ${e.tipo.toUpperCase()}</div>
-        <div class="student-event-title">${e.titulo}</div>
-        ${e.desc?`<div class="student-event-desc">${e.desc}</div>`:''}
-      </div>
-    </div>`;
-  }).join('');
-
-  body.innerHTML = `
-    <!-- Name block -->
-    <div class="student-name-block">
-      <div class="student-name">${(alumno.apellido||'')} ${(alumno.nombre||'')}</div>
-      <div class="student-meta">
-        ${alumno.legajo?`Legajo: ${alumno.legajo} &nbsp;·&nbsp; `:''}${year.label} &nbsp;·&nbsp; ${comision.name}
-      </div>
-      <div style="margin-top:8px">
-        <span class="estado-badge estado-${estado}">${estado}</span>
-      </div>
-    </div>
-
-    <!-- Asistencia -->
-    <div class="student-section">
-      <div class="student-section-title">Asistencia</div>
-      <div class="student-stat-grid">
-        <div class="student-stat">
-          <div class="student-stat-num" style="color:var(--presente)">${p}</div>
-          <div class="student-stat-label">Presentes</div>
-        </div>
-        <div class="student-stat">
-          <div class="student-stat-num" style="color:var(--tardanza)">${t}</div>
-          <div class="student-stat-label">Tardes</div>
-        </div>
-        <div class="student-stat">
-          <div class="student-stat-num" style="color:var(--ausente)">${a}</div>
-          <div class="student-stat-label">Ausentes</div>
-        </div>
-      </div>
-      ${pct!==null?`
-        <div style="margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
-          <span style="font-size:12px;color:var(--text2);font-family:'DM Mono',monospace">Porcentaje de asistencia</span>
-          <span style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:${pctColor}">${pct}%</span>
-        </div>
-        <div class="student-asist-bar">
-          <div class="student-asist-bar-fill" style="width:${pct}%;background:${pctColor}"></div>
-        </div>
-        <div style="font-size:11px;color:var(--text3);font-family:'DM Mono',monospace;margin-bottom:12px">
-          ${pct>=75?'Regular — cumple el mínimo del 75%':'Atención — por debajo del mínimo de regularidad'}
-        </div>` : ''}
-      ${asistRows ? `<div style="margin-top:8px">${asistRows}</div>` : '<div style="font-size:13px;color:var(--text3);padding:12px 0">Sin clases registradas aún.</div>'}
-    </div>
-
-    <!-- Notas -->
-    <div class="student-section">
-      <div class="student-section-title">Notas</div>
-      <div class="student-nota-row">
-        <span class="student-nota-label">Participación</span>
-        <span class="student-nota-val">${notaLabel(notas.participacion)}</span>
-      </div>
-      <div class="student-nota-row">
-        <span class="student-nota-label">Trabajos</span>
-        <span class="student-nota-val">${notaLabel(notas.trabajos)}</span>
-      </div>
-      <div class="student-nota-row">
-        <span class="student-nota-label">Entrega Final</span>
-        <span class="student-nota-val">${notaLabel(notas.final)}</span>
-      </div>
-      <div class="student-nota-row">
-        <span class="student-nota-label">Entrega TP</span>
-        <span class="student-nota-val" style="color:${notas.entregado?'var(--presente)':'var(--text3)'}">${entregaStr}</span>
-      </div>
-    </div>
-
-    <!-- Programa -->
-    ${prog.length ? `
-    <div class="student-section">
-      <div class="student-section-title">Programa del año</div>
-      ${progRows}
-    </div>` : ''}
-
-    <!-- Calendario -->
-    ${eventos.length ? `
-    <div class="student-section">
-      <div class="student-section-title">Calendario de clases</div>
-      ${eventRows}
-    </div>` : ''}
-  `;
-
-  screen.classList.add('open');
-  document.getElementById('pinScreen').style.display = 'none';
-}
-
-function fbLogoutAndReset() { showLoginScreen(); }
-
-// exitStudentView defined in login script
-
-
-// ── Firebase config check on load ──────────────────────
-// Fallback: if Firebase hasn't initialized after 3s, show login
-window.addEventListener('load', () => {
-  setTimeout(() => {
-    if (!window._fbReady && !window._appUnlocked) {
-      const ls = document.getElementById('loadingScreen');
-      if (ls) ls.style.display = 'none';
-      document.getElementById('fbLoginScreen').style.display = 'flex';
-    }
-  }, 3000);
-});
-
 </script>
-
-<!-- Modal: nota individual -->
-<div class="modal-overlay" id="modalNota" onclick="closeModal(event)">
-  <div class="modal">
-    <div class="modal-handle"></div>
-    <div class="modal-title" id="notaModalTitle"></div>
-    <div id="notaModalChips" style="display:flex;flex-wrap:wrap;gap:8px;margin:16px 0"></div>
-    <button onclick="confirmNotaActiva(null)" style="width:100%;padding:10px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:12px;color:var(--text3);cursor:pointer;margin-top:4px">Borrar nota</button>
-  </div>
-</div>
-
-<!-- Modal: gestión trabajos -->
-<div class="modal-overlay" id="modalGestionTrabajos" onclick="closeModal(event)">
-  <div class="modal">
-    <div class="modal-handle"></div>
-    <!-- content injected by openModalRaw -->
-  </div>
-</div>
-
-
-<!-- ═══════════ VIEW: EJERCICIO TRANSVERSAL ═══════════ -->
-<div class="view" id="view-transversal">
-  <div style="padding:16px 18px">
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:2px;margin-bottom:4px">Ejercicio Transversal</div>
-    <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:20px">Grupos con alumnos de distintos años</div>
-    <div id="transversalBody"></div>
-  </div>
-</div>
-
 </body>
 </html>
