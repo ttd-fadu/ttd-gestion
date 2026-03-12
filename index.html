@@ -1021,7 +1021,34 @@ select.input-field { cursor: pointer; }
       if (user) {
         window._fbUser = user;
         if (!window._appUnlocked && !window._intentionalLogout) {
-          unlockApp();
+          // Load Firestore state before unlocking
+          db.collection('ttd').doc('state').get().then(function(snap) {
+            if (snap.exists) {
+              var remote = snap.data();
+              if (remote && typeof remote === 'object') {
+                Object.assign(state, remote);
+                window.state = state;
+                localStorage.setItem('ttd_v1', JSON.stringify(state));
+              }
+            }
+            // Ensure all alumnos have PINs, save if any were added
+            var needsSave = false;
+            (state.years||[]).forEach(function(y){
+              (y.comisiones||[]).forEach(function(c){
+                (c.alumnos||[]).forEach(function(a){
+                  if (!a.pin) { a.pin = genPin(); needsSave = true; }
+                });
+              });
+            });
+            if (needsSave) {
+              localStorage.setItem('ttd_v1', JSON.stringify(state));
+              window.fbSave(JSON.parse(JSON.stringify(state)));
+            }
+            unlockApp();
+          }).catch(function() {
+            // Firestore failed — use localStorage and unlock anyway
+            unlockApp();
+          });
         }
       } else {
         window._fbUser = null;
@@ -1043,12 +1070,19 @@ select.input-field { cursor: pointer; }
             var remote = snap.data();
             if (remote && typeof remote === 'object') {
               Object.assign(state, remote);
-              (state.years||[]).forEach(function(y){
-                (y.comisiones||[]).forEach(function(c){
-                  (c.alumnos||[]).forEach(function(a){ if(!a.pin) a.pin = genPin(); });
-                });
-              });
+              window.state = state;
             }
+          }
+          // Ensure all alumnos have PINs
+          var _needsSave = false;
+          (state.years||[]).forEach(function(y){
+            (y.comisiones||[]).forEach(function(c){
+              (c.alumnos||[]).forEach(function(a){ if(!a.pin){ a.pin=genPin(); _needsSave=true; } });
+            });
+          });
+          if (_needsSave) {
+            localStorage.setItem('ttd_v1', JSON.stringify(state));
+            window.fbSave(JSON.parse(JSON.stringify(state)));
           }
         } catch(e) {}
         return null; // no error
@@ -1366,110 +1400,134 @@ function ensurePin(alumno) {
 // ══════════════════════════════════════════════════════════
 function loadSampleData() {
   const y1 = state.years[0];
-  // Always ensure demo alumno exists in first comision for testing
+
+  // Ensure demo alumno in first comision always
   const allAlumnos = y1.comisiones.flatMap(c => c.alumnos || []);
   const hasDemo = allAlumnos.some(a => a.pin === '0000');
   if (!hasDemo && y1.comisiones.length > 0) {
-    // Add demo student to existing first comision
     const firstC = y1.comisiones[0];
     if (!firstC.alumnos.some(a => a.pin === '0000')) {
       firstC.alumnos.push({id:'s0',nombre:'Demo',apellido:'Alumno',legajo:'LU-0000',email:'demo@ttd.edu.ar',pin:'0000'});
       save();
     }
   }
-  if (y1.comisiones.length > 0) return;
+  // Only skip if there are real alumnos (not just the demo one)
+  const realAlumnos = y1.comisiones.flatMap(c => c.alumnos||[]).filter(a => a.pin !== '0000');
+  if (realAlumnos.length > 0) return;
+  // Clear any placeholder comisions before adding sample data
+  y1.comisiones = [];
 
-  const sampleAlumnos1 = [
-    // PINs auto-generated at creation time
-    {id:'s0',nombre:'Demo',apellido:'Alumno',legajo:'LU-0000',email:'demo@ttd.edu.ar',pin:'0000'},
-    {id:'s1',nombre:'Valentina',apellido:'Rodríguez',legajo:'LU-0421',email:'v.rodriguez@fadu.uba.ar',pin:'1111'},
-    {id:'s2',nombre:'Matías',apellido:'González',legajo:'LU-0398',email:'m.gonzalez@fadu.uba.ar'},
-    {id:'s3',nombre:'Lucía',apellido:'Fernández',legajo:'LU-0455',email:'l.fernandez@fadu.uba.ar'},
-    {id:'s4',nombre:'Tomás',apellido:'López',legajo:'LU-0412',email:'t.lopez@fadu.uba.ar'},
-    {id:'s5',nombre:'Sofía',apellido:'Martínez',legajo:'LU-0467',email:'s.martinez@fadu.uba.ar'},
-    {id:'s6',nombre:'Bruno',apellido:'Sánchez',legajo:'LU-0389',email:'b.sanchez@fadu.uba.ar'},
+  // ── Trabajos de 1° año ──────────────────────────────────
+  const tw = [
+    {id:'tw1',nombre:'Participación',tipo:'individual',drive:'',grupos:[]},
+    {id:'tw2',nombre:'TP 1 — Morfología',tipo:'grupal',drive:'https://drive.google.com/drive/folders/sample1',grupos:[]},
+    {id:'tw3',nombre:'TP 2 — Identidad',tipo:'grupal',drive:'https://drive.google.com/drive/folders/sample2',grupos:[]},
+    {id:'tw4',nombre:'Preentrega',tipo:'individual',drive:'',grupos:[]},
+    {id:'tw5',nombre:'Entrega Final',tipo:'grupal',drive:'https://drive.google.com/drive/folders/sample3',grupos:[]},
   ];
-  const sampleAlumnos2 = [
-    {id:'s7',nombre:'Emilia',apellido:'Romero',legajo:'LU-0501',email:'e.romero@fadu.uba.ar'},
-    {id:'s8',nombre:'Nicolás',apellido:'Torres',legajo:'LU-0489',email:'n.torres@fadu.uba.ar'},
-    {id:'s9',nombre:'Abril',apellido:'Díaz',legajo:'LU-0512',email:'a.diaz@fadu.uba.ar'},
-    {id:'s10',nombre:'Facundo',apellido:'Ruiz',legajo:'LU-0478',email:'f.ruiz@fadu.uba.ar'},
+  y1.trabajos = tw;
+
+  // ── Alumnos Comisión A ──────────────────────────────────
+  const A = [
+    {id:'s0', nombre:'Demo',      apellido:'Alumno',    legajo:'LU-0000', email:'demo@ttd.edu.ar',            pin:'0000'},
+    {id:'s1', nombre:'Valentina', apellido:'Rodríguez', legajo:'LU-0421', email:'v.rodriguez@fadu.uba.ar',    pin:'2847'},
+    {id:'s2', nombre:'Matías',    apellido:'González',  legajo:'LU-0398', email:'m.gonzalez@fadu.uba.ar',     pin:'5193'},
+    {id:'s3', nombre:'Lucía',     apellido:'Fernández', legajo:'LU-0455', email:'l.fernandez@fadu.uba.ar',    pin:'7362'},
+    {id:'s4', nombre:'Tomás',     apellido:'López',     legajo:'LU-0412', email:'t.lopez@fadu.uba.ar',        pin:'4815'},
+    {id:'s5', nombre:'Sofía',     apellido:'Martínez',  legajo:'LU-0467', email:'s.martinez@fadu.uba.ar',     pin:'9241'},
+    {id:'s6', nombre:'Bruno',     apellido:'Sánchez',   legajo:'LU-0389', email:'b.sanchez@fadu.uba.ar',      pin:'6073'},
+    {id:'s7', nombre:'Camila',    apellido:'Herrera',   legajo:'LU-0501', email:'c.herrera@fadu.uba.ar',      pin:'3158'},
+    {id:'s8', nombre:'Nicolás',   apellido:'Torres',    legajo:'LU-0489', email:'n.torres@fadu.uba.ar',       pin:'8426'},
   ];
 
-  const fechas = ['2025-03-12','2025-03-19','2025-03-26','2025-04-02','2025-04-09'];
-  function randomAsist(id) {
-    const opciones = ['P','P','P','T','A'];
-    const r = {};
-    sampleAlumnos1.forEach(a => { r[a.id] = opciones[Math.floor(Math.random()*opciones.length)]; });
-    return r;
-  }
-  const asist1 = {};
-  fechas.forEach(f => { asist1[f] = {}; sampleAlumnos1.forEach(a => { asist1[f][a.id] = ['P','P','P','T','A'][Math.floor(Math.random()*5)]; }); });
-
-  const notas1 = {};
-  sampleAlumnos1.forEach(a => {
-    notas1[a.id] = {
-      participacion: (Math.floor(Math.random()*4)+6),
-      trabajos: (Math.floor(Math.random()*5)+5),
-      final: null,
-      entregado: Math.random() > .3,
-      estado: 'cursando',
-      observacion: ''
-    };
+  // ── Asistencias 2026 (lunes y jueves) ──────────────────
+  const clases = [
+    '2026-03-05','2026-03-09','2026-03-12','2026-03-16','2026-03-19',
+    '2026-03-23','2026-03-26','2026-03-30','2026-04-02','2026-04-06',
+    '2026-04-09','2026-04-13',
+  ];
+  // Perfiles de asistencia realistas por alumno
+  const perfil = {
+    s0:['P','P','P','P','P','P','P','P','P','P','P','P'],
+    s1:['P','P','P','P','P','P','P','P','P','P','P','P'],
+    s2:['P','P','P','T','P','P','P','P','T','P','P','P'],
+    s3:['P','P','A','P','P','P','P','P','P','P','P','A'],
+    s4:['P','T','P','P','A','P','P','T','P','P','P','P'],
+    s5:['P','P','P','P','P','P','P','P','P','P','P','P'],
+    s6:['A','P','P','P','P','A','P','P','P','T','P','P'],
+    s7:['P','P','P','P','P','P','T','P','P','P','P','P'],
+    s8:['P','P','A','P','A','P','P','P','A','P','P','P'],
+  };
+  const asistA = {};
+  clases.forEach(function(f, i) {
+    asistA[f] = {};
+    A.forEach(function(a) { asistA[f][a.id] = (perfil[a.id]||[])[i] || 'P'; });
   });
 
-  const eventos1 = [
-    {id:'e1',tipo:'clase',fecha:'2025-05-07',titulo:'Clase 10 — Tipografía y jerarquía',desc:'Ver referencias Muller-Brockmann'},
-    {id:'e2',tipo:'invitado',fecha:'2025-05-14',titulo:'Invitado: Estudio Coprofago',desc:'Charla sobre diseño editorial independiente'},
-    {id:'e3',tipo:'entrega',fecha:'2025-05-21',titulo:'Entrega TP2 — Identidad Visual',desc:'Presentación en formato A3 + digital'},
+  // ── Notas Comisión A ────────────────────────────────────
+  // tw1=Participación(individual), tw2=TP1(grupal), tw3=TP2(grupal), tw4=Preentrega(ind), tw5=Final(grupal)
+  const notasA = {};
+  const notasData = {
+    s0:{tw1:8, tw2:7, tw3:null, tw4:8,  tw5:null, est:'cursando'},
+    s1:{tw1:9, tw2:8, tw3:8,    tw4:9,  tw5:null, est:'cursando'},
+    s2:{tw1:7, tw2:8, tw3:8,    tw4:6,  tw5:null, est:'cursando'},
+    s3:{tw1:8, tw2:9, tw3:9,    tw4:8,  tw5:null, est:'cursando'},
+    s4:{tw1:6, tw2:7, tw3:7,    tw4:5,  tw5:null, est:'cursando'},
+    s5:{tw1:9, tw2:9, tw3:9,    tw4:9,  tw5:null, est:'cursando'},
+    s6:{tw1:5, tw2:7, tw3:7,    tw4:null,tw5:null, est:'cursando'},
+    s7:{tw1:8, tw2:8, tw3:null, tw4:7,  tw5:null, est:'cursando'},
+    s8:{tw1:4, tw2:6, tw3:null, tw4:null,tw5:null, est:'libre'},
+  };
+  A.forEach(function(a) {
+    const d = notasData[a.id] || {};
+    notasA[a.id] = { estado: d.est || 'cursando', observacion: '' };
+    ['tw1','tw2','tw3','tw4','tw5'].forEach(function(tid) {
+      if (d[tid] != null) notasA[a.id][tid] = {valor: String(d[tid]), sistema:'numerico'};
+      notasA[a.id][tid+'_entrega'] = (d[tid] != null);
+    });
+  });
+
+  // ── Grupos Comisión A ───────────────────────────────────
+  const gruposA = [
+    {id:'g1', nombre:'Grupo Bauhaus',  miembros:['s1','s2','s3']},
+    {id:'g2', nombre:'Grupo Ulm',      miembros:['s4','s5','s6']},
+    {id:'g3', nombre:'Grupo Memphis',  miembros:['s7','s8']},
+  ];
+
+  // ── Eventos Comisión A ──────────────────────────────────
+  const eventosA = [
+    {id:'e1',tipo:'clase',    fecha:'2026-03-05',titulo:'Clase 1 — Presentación TTD',desc:'Introducción a la materia, metodología y programa.'},
+    {id:'e2',tipo:'clase',    fecha:'2026-03-09',titulo:'Clase 2 — Morfología',desc:'Forma, figura y fondo. Ejercicios en papel.'},
+    {id:'e3',tipo:'clase',    fecha:'2026-03-12',titulo:'Clase 3 — Composición',desc:'Principios compositivos: ritmo, tensión, equilibrio.'},
+    {id:'e4',tipo:'clase',    fecha:'2026-03-16',titulo:'Clase 4 — Tipografía I',desc:'Anatomía tipográfica. Sans serif vs serif.'},
+    {id:'e5',tipo:'clase',    fecha:'2026-03-19',titulo:'Clase 5 — Tipografía II',desc:'Jerarquía y ritmo tipográfico.'},
+    {id:'e6',tipo:'clase',    fecha:'2026-03-23',titulo:'Clase 6 — Retícula',desc:'Sistemas de grilla y módulo.'},
+    {id:'e7',tipo:'entrega',  fecha:'2026-03-26',titulo:'Entrega TP 1 — Morfología',desc:'Presentación láminas A3 + digital.'},
+    {id:'e8',tipo:'invitado', fecha:'2026-03-30',titulo:'Invitado: Est. Coprofago',desc:'Charla sobre diseño editorial independiente.'},
+    {id:'e9',tipo:'clase',    fecha:'2026-04-02',titulo:'Clase 7 — Color I',desc:'Teoría del color. Círculo cromático y contraste.'},
+    {id:'e10',tipo:'feriado', fecha:'2026-04-06',titulo:'Feriado — Semana Santa',desc:''},
+    {id:'e11',tipo:'clase',   fecha:'2026-04-09',titulo:'Clase 8 — Color II',desc:'Paletas, armonías y aplicación al proyecto.'},
+    {id:'e12',tipo:'clase',   fecha:'2026-04-13',titulo:'Clase 9 — Identidad Visual',desc:'Marca, símbolo, logotipo. Briefing TP2.'},
   ];
 
   y1.comisiones.push({
-    id: 'c1', name: 'Comisión A — Mañana',
-    alumnos: sampleAlumnos1, asistencias: asist1, notas: notas1,
-    grupos: [{id:'g1',nombre:'Grupo 1',miembros:['s1','s2','s3']},{id:'g2',nombre:'Grupo 2',miembros:['s4','s5','s6']}],
-    drive: null, eventos: eventos1
+    id:'c1', name:'Comisión A — Mañana',
+    alumnos: A, asistencias: asistA, notas: notasA,
+    grupos: gruposA, drive: null, eventos: eventosA,
   });
 
-  const asist2 = {};
-  fechas.forEach(f => { asist2[f] = {}; sampleAlumnos2.forEach(a => { asist2[f][a.id] = ['P','P','P','T','A'][Math.floor(Math.random()*5)]; }); });
-  const notas2 = {};
-  sampleAlumnos2.forEach(a => {
-    notas2[a.id] = { participacion: (Math.floor(Math.random()*4)+5), trabajos: (Math.floor(Math.random()*5)+4), final: null, entregado: Math.random() > .4, estado: 'cursando', observacion: '' };
-  });
-  y1.comisiones.push({
-    id: 'c2', name: 'Comisión B — Tarde',
-    alumnos: sampleAlumnos2, asistencias: asist2, notas: notas2,
-    grupos: [], drive: null, eventos: []
-  });
-
-  // Programa por año
-  if (!state.years[0].programa?.length) state.years[0].programa = [
-    {id:'p11',titulo:'Unidad 1 — Introducción al TTD',desc:'Presentación de la disciplina, metodología proyectual y herramientas.',dado:true},
+  // ── Programa año 1 ──────────────────────────────────────
+  state.years[0].programa = [
+    {id:'p11',titulo:'Unidad 1 — Introducción al TTD',     desc:'Presentación de la disciplina, metodología proyectual y herramientas.',dado:true},
     {id:'p12',titulo:'Unidad 2 — Morfología y Composición',desc:'Forma, espacio, ritmo visual y principios compositivos.',dado:true},
-    {id:'p13',titulo:'Unidad 3 — Color y Materia',desc:'Teoría del color, paletas y relación materia-superficie.',dado:false},
-    {id:'p14',titulo:'Unidad 4 — Proyecto Integrador',desc:'Desarrollo del proyecto final integrando los contenidos del año.',dado:false},
-  ];
-  if (!state.years[1].programa?.length) state.years[1].programa = [
-    {id:'p21',titulo:'Unidad 1 — Tipografía Avanzada',desc:'Anatomía, jerarquía tipográfica y sistemas de grilla.',dado:true},
-    {id:'p22',titulo:'Unidad 2 — Identidad Visual',desc:'Marca, símbolo, logotipo y sistema de aplicación.',dado:false},
-    {id:'p23',titulo:'Unidad 3 — Diseño Editorial',desc:'Retícula, maquetación, portadas y publicaciones.',dado:false},
-  ];
-  if (!state.years[2].programa?.length) state.years[2].programa = [
-    {id:'p31',titulo:'Unidad 1 — Diseño de Sistemas',desc:'Sistemas de diseño, guías de estilo y componentes.',dado:false},
-    {id:'p32',titulo:'Unidad 2 — Entornos Digitales',desc:'UI/UX, interfaces y experiencia de usuario.',dado:false},
-  ];
-  if (!state.years[3].programa?.length) state.years[3].programa = [
-    {id:'p41',titulo:'Unidad 1 — Investigación Proyectual',desc:'Metodología de investigación aplicada al diseño.',dado:false},
-  ];
-  if (!state.years[4].programa?.length) state.years[4].programa = [
-    {id:'p51',titulo:'Unidad 1 — Proyecto Final de Carrera',desc:'Desarrollo del PFC y preparación para la defensa.',dado:false},
+    {id:'p13',titulo:'Unidad 3 — Color y Materia',         desc:'Teoría del color, paletas y relación materia-superficie.',dado:false},
+    {id:'p14',titulo:'Unidad 4 — Proyecto Integrador',     desc:'Desarrollo del proyecto final.',dado:false},
   ];
 
-  // Ensure all sample alumnos have PINs
-  state.years.forEach(y => {
-    y.comisiones.forEach(c => {
-      (c.alumnos||[]).forEach(a => { if (!a.pin) a.pin = genPin(); });
+  // Ensure all alumnos have PINs
+  state.years.forEach(function(y) {
+    y.comisiones.forEach(function(c) {
+      (c.alumnos||[]).forEach(function(a) { if (!a.pin) a.pin = genPin(); });
     });
   });
   save();
