@@ -43,24 +43,30 @@ async function docenteLogin() {
     return;
   }
 
-  // Try Firebase first
+  // Always accept PIN 1234 as offline fallback password
+  var localPin = (typeof state !== 'undefined' ? state.pin : null) || '1234';
+  if (pass === localPin || pass === '1234') {
+    unlockApp(); return;
+  }
+
+  // Try Firebase with timeout
   if (window.fbDoLogin) {
     btn.textContent = 'Ingresando...';
     btn.disabled = true;
-    var err = await window.fbDoLogin(email, pass);
+    var loginPromise = window.fbDoLogin(email, pass);
+    var timeoutPromise = new Promise(res => setTimeout(() => res('timeout'), 8000));
+    var err = await Promise.race([loginPromise, timeoutPromise]);
     btn.textContent = 'Ingresar';
     btn.disabled = false;
-    if (!err) return; // onAuthStateChanged calls unlockApp
-    // Offline or any Firebase error — also accept local PIN as password
-    if (pass === (window._localState ? window._localState.pin : '1234') || pass === '1234') {
-      unlockApp(); return;
+    if (!err) return; // success — onAuthStateChanged calls unlockApp
+    if (err === 'timeout') {
+      errEl.textContent = 'Sin conexión. Usá PIN local 1234 como contraseña.';
+    } else {
+      errEl.textContent = err;
     }
-    errEl.textContent = err;
     errEl.style.display = 'block';
   } else {
-    // No Firebase — offline mode, use PIN as password
-    if (pass === (state.pin || '1234')) { unlockApp(); return; }
-    errEl.textContent = 'Contraseña incorrecta';
+    errEl.textContent = 'Sin conexión. Usá PIN local 1234 como contraseña.';
     errEl.style.display = 'block';
   }
 }
@@ -96,7 +102,9 @@ function _loginCheck() {
   // Only handles alumno PIN — docente uses email form
   const errEl = document.getElementById('loginError');
   let found = null, foundYear = null, foundComision = null;
-  state.years.forEach(y => y.comisiones.forEach(c =>
+  const _st = window.state; // state defined in main script — access via window
+  if (!_st) { errEl.textContent = 'Cargando...'; errEl.style.display='block'; return; }
+  _st.years.forEach(y => y.comisiones.forEach(c =>
     (c.alumnos || []).forEach(a => {
       if (a.pin && a.pin === _loginBuffer) {
         found = a; foundYear = y; foundComision = c;
@@ -139,9 +147,34 @@ function showLoginScreen() {
   _loginUpdateDots();
   _loginMode = 'alumno';
   loginSetMode('alumno');
-  document.getElementById('loginScreen').style.display = 'flex';
+  var _ls = document.getElementById('loginScreen');
+  if (_ls) { _ls.style.display = 'flex'; _ls.style.zIndex = '600'; }
   document.getElementById('mainHeader').style.display = 'none';
+  document.getElementById('studentScreen').classList.remove('open');
+  var loadSc = document.getElementById('loadingScreen');
+  if (loadSc) loadSc.style.display = 'none';
+  window.scrollTo(0, 0);
+  // Close any open modals
+  document.querySelectorAll('.modal-overlay,.modal-backdrop').forEach(m => m.classList.remove('open'));
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  // Reset login form
+  var emailEl = document.getElementById('loginEmail');
+  var passEl = document.getElementById('loginPass');
+  var btnEl = document.getElementById('loginDocenteBtn');
+  if (emailEl) emailEl.value = '';
+  if (passEl) passEl.value = '';
+  if (btnEl) { btnEl.textContent = 'Ingresar'; btnEl.disabled = false; }
+  var errEl = document.getElementById('loginError');
+  if (errEl) errEl.style.display = 'none';
+  // Show alumno panel by default
+  var pa = document.getElementById('loginPanelAlumno');
+  var pd = document.getElementById('loginPanelDocente');
+  if (pa) pa.style.display = 'flex';
+  if (pd) pd.style.display = 'none';
+  var ta = document.getElementById('loginTabAlumno');
+  var td = document.getElementById('loginTabDocente');
+  if (ta) ta.classList.add('active');
+  if (td) td.classList.remove('active');
 }
 
 function unlockApp() {
@@ -945,7 +978,8 @@ select.input-field { cursor: pointer; }
   border-bottom: 3px solid var(--text2); font-weight: 600;
 }
 .cal-day.cal-clase-day {
-  background: #f0f0f0; border-radius: 4px;
+  background: #f0f0ee;
+  border-radius: 4px;
 }
 .cal-day.cal-entrega {
   border-bottom: 3px solid var(--ttd); font-weight: 600;
@@ -982,6 +1016,19 @@ select.input-field { cursor: pointer; }
     window.fbConfigured = true;
     window._fbReady = true;
 
+    // Monitor auth state
+    auth.onAuthStateChanged(function(user) {
+      if (user) {
+        window._fbUser = user;
+        if (!window._appUnlocked && !window._intentionalLogout) {
+          unlockApp();
+        }
+      } else {
+        window._fbUser = null;
+        window._appUnlocked = false;
+        if (typeof showLoginScreen === 'function') showLoginScreen();
+      }
+    });
     // Sign out any cached session — login screen is always shown on load
     auth.signOut().catch(function(){});
 
@@ -1113,7 +1160,7 @@ select.input-field { cursor: pointer; }
 <div id="studentScreen">
   <div class="student-header">
     <span class="student-header-logo">TTD</span>
-    <button class="student-exit" onclick="exitStudentView()">Salir</button>
+    <button class="student-exit" onclick="exitStudentView()">Cerrar sesión</button>
   </div>
   <div class="student-body" id="studentBody"></div>
 </div>
@@ -1130,12 +1177,28 @@ select.input-field { cursor: pointer; }
   <button onclick="showView('view-config')" style="background:none;border:none;cursor:pointer;color:var(--text2);padding:4px">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   </button>
+  <button onclick="fbLogoutAndReset()" title="Cerrar sesión" style="background:none;border:none;cursor:pointer;color:var(--text3);padding:4px;display:flex;align-items:center">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+  </button>
 </div><div class="toast" id="toast"></div><!-- ═══════════ VIEW: INICIO ═══════════ -->
-<div class="view" id="view-years"><div class="welcome-banner"><div class="welcome-title">Taller Transversal de Diseño</div><div class="welcome-sub" id="welcomeSub">Cargando...</div></div><div class="section-title">Años de la cursada</div><div class="year-grid" id="yearGrid"></div>
+<div class="view" id="view-years"><div class="welcome-banner"><div class="welcome-title">Taller Transversal de Diseño</div><div class="welcome-sub" id="welcomeSub">Cargando...</div></div><div class="section-title">Años de la cursada</div><div class="year-grid" id="yearGrid">
+  <button onclick="fbLogoutAndReset()" title="Cerrar sesión" style="background:none;border:none;cursor:pointer;color:var(--text3);padding:4px;display:flex;align-items:center">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+  </button>
+</div>
 </div><!-- ═══════════ VIEW: COMISIONES ═══════════ -->
 <div class="view" id="view-comisiones"><div id="proximaClaseBanner"></div><div class="section-title" id="comisTitle"></div><div id="comisionList"></div><button class="btn-ghost-add" onclick="showAddComision()">+ Nueva comisión</button>
+  <button onclick="fbLogoutAndReset()" title="Cerrar sesión" style="background:none;border:none;cursor:pointer;color:var(--text3);padding:4px;display:flex;align-items:center">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+  </button>
 </div><!-- ═══════════ VIEW: COMISION DETAIL ═══════════ -->
-<div class="view" id="view-comision"><div class="pill" id="comisionPill"></div><div class="tabs" id="mainTabs"><div class="tab active" onclick="switchTab('asistencia')">Asist.</div><div class="tab" onclick="switchTab('notas')">Notas</div><div class="tab" onclick="switchTab('grupos')">Grupos</div><div class="tab" onclick="switchTab('drive')">Drive</div><div class="tab" onclick="switchTab('calendario')">Cal.</div><div class="tab" onclick="switchTab('historial')">Hist.</div><div class="tab" onclick="switchTab('resumen')">Resumen</div></div><!-- ASISTENCIA --><div id="tab-asistencia"><div id="contadorReg" style="margin-bottom:12px"></div><div class="date-bar"><span class="date-label"> Clase del</span><input type="date" class="date-input" id="dateInput"></div><div id="alertasComision" style="margin-bottom:10px"></div><div id="alumnoList"></div><div class="action-row"><button class="btn-secondary" onclick="showModalAlumno()">+ Alumno</button><button class="btn-secondary" onclick="exportCSV()">↓ CSV</button><button class="btn-secondary" onclick="exportPDF()">↓ PDF</button></div></div><!-- NOTAS --><div id="tab-notas" style="display:none"><div id="notasList"></div><button class="btn-primary" onclick="saveNotas()">Guardar notas</button></div><!-- GRUPOS --><div id="tab-grupos" style="display:none"><div id="gruposList"></div><button class="btn-ghost-add mt8" onclick="showAddGrupo()">+ Nuevo grupo</button></div><!-- DRIVE --><div id="tab-drive" style="display:none"><div class="info-box"> Conectá una carpeta pública de Google Drive para detectar entregas automáticamente.</div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-weight:600;font-size:14px"> Google Drive</span><span id="driveStatusBadge" style="font-size:11px;color:var(--text3)">No conectado</span></div><div id="driveNotConnected"><input class="input-field" type="text" id="driveFolderUrl" placeholder="https://drive.google.com/drive/folders/..." style="margin-bottom:8px"/><button class="btn-primary" style="margin-top:0" onclick="driveConnect()">Conectar carpeta</button></div><div id="driveConnected" style="display:none"><div style="font-size:12px;color:var(--text3);margin-bottom:10px" id="driveLastSync"></div><button class="btn-secondary" onclick="driveSyncNow()" style="width:100%;justify-content:center">Sincronizar</button><div id="driveFileList" style="margin-top:12px"></div></div></div><div class="section-title mt16">Entregas por alumno</div><div id="entregaAlumnoList"></div><button class="btn-primary" onclick="saveNotas()">Guardar</button></div><!-- CALENDARIO --><div id="tab-calendario" style="display:none"><div id="calendarWidget"></div><div class="action-row"><button class="btn-secondary" onclick="showAddEvento('clase')" style="flex:1;justify-content:center">+ Clase</button><button class="btn-secondary" onclick="showAddEvento('invitado')" style="flex:1;justify-content:center">+ Invitado</button><button class="btn-secondary" onclick="showAddEvento('entrega')" style="flex:1;justify-content:center">+ Entrega</button><button class="btn-secondary" onclick="showAddEvento('feriado')" style="flex:1;justify-content:center">+ Feriado</button></div><div class="cal-event-list" id="calEventList"></div><div id="calImportArea"></div></div><!-- HISTORIAL --><div id="tab-historial" style="display:none"><div id="historialList"></div></div><!-- RESUMEN --><div id="tab-resumen" style="display:none"><div class="resumen-grid" id="resumenGrid"></div><div class="chart-wrap"><div class="chart-title">Evolución de asistencia</div><canvas id="chartCanvas" class="chart-canvas"></canvas></div><div class="section-title">Ranking de participación</div><div id="rankingList" style="margin-bottom:16px"></div><div class="section-title">Por alumno</div><div id="resumenAlumnos"></div></div>
+<div class="view" id="view-comision"><div class="pill" id="comisionPill"></div><div class="tabs" id="mainTabs"><div class="tab active" onclick="switchTab('asistencia')">Asist.</div><div class="tab" onclick="switchTab('notas')">Notas</div><div class="tab" onclick="switchTab('grupos')">Grupos</div><div class="tab" onclick="switchTab('drive')">Drive</div><div class="tab" onclick="switchTab('calendario')">Cal.</div><div class="tab" onclick="switchTab('historial')">Hist.</div><div class="tab" onclick="switchTab('resumen')">Resumen</div></div><!-- ASISTENCIA --><div id="tab-asistencia"><div id="contadorReg" style="margin-bottom:12px"></div><div class="date-bar">
+  <span class="date-label">Clase del</span>
+  <div style="position:relative;display:inline-block" onclick="var di=document.getElementById('dateInput');di.showPicker?di.showPicker():di.click()">
+    <input type="date" class="date-input" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:3" onchange="updateDateDisplay();renderAlumnos();">
+    <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);cursor:pointer;min-width:120px;text-align:center;pointer-events:none">—</div>
+  </div>
+</div><div id="alertasComision" style="margin-bottom:10px"></div><div id="alumnoList"></div><div class="action-row"><button class="btn-secondary" onclick="showModalAlumno()">+ Alumno</button><button class="btn-secondary" onclick="exportCSV()">↓ CSV</button><button class="btn-secondary" onclick="exportPDF()">↓ PDF</button></div></div><!-- NOTAS --><div id="tab-notas" style="display:none"><div id="notasList"></div><button class="btn-primary" onclick="saveNotas()">Guardar notas</button></div><!-- GRUPOS --><div id="tab-grupos" style="display:none"><div id="gruposList"></div><button class="btn-ghost-add mt8" onclick="showAddGrupo()">+ Nuevo grupo</button></div><!-- DRIVE --><div id="tab-drive" style="display:none"><div class="info-box"> Conectá una carpeta pública de Google Drive para detectar entregas automáticamente.</div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-weight:600;font-size:14px"> Google Drive</span><span id="driveStatusBadge" style="font-size:11px;color:var(--text3)">No conectado</span></div><div id="driveNotConnected"><input class="input-field" type="text" id="driveFolderUrl" placeholder="https://drive.google.com/drive/folders/..." style="margin-bottom:8px"/><button class="btn-primary" style="margin-top:0" onclick="driveConnect()">Conectar carpeta</button></div><div id="driveConnected" style="display:none"><div style="font-size:12px;color:var(--text3);margin-bottom:10px" id="driveLastSync"></div><button class="btn-secondary" onclick="driveSyncNow()" style="width:100%;justify-content:center">Sincronizar</button><div id="driveFileList" style="margin-top:12px"></div></div></div><div class="section-title mt16">Entregas por alumno</div><div id="entregaAlumnoList"></div><button class="btn-primary" onclick="saveNotas()">Guardar</button></div><!-- CALENDARIO --><div id="tab-calendario" style="display:none"><div id="calendarWidget"></div><div class="action-row"><button class="btn-secondary" onclick="showAddEvento('clase')" style="flex:1;justify-content:center">+ Clase</button><button class="btn-secondary" onclick="showAddEvento('invitado')" style="flex:1;justify-content:center">+ Invitado</button><button class="btn-secondary" onclick="showAddEvento('entrega')" style="flex:1;justify-content:center">+ Entrega</button><button class="btn-secondary" onclick="showAddEvento('feriado')" style="flex:1;justify-content:center">+ Feriado</button></div><div class="cal-event-list" id="calEventList"></div><div id="calImportArea"></div></div><!-- HISTORIAL --><div id="tab-historial" style="display:none"><div id="historialList"></div></div><!-- RESUMEN --><div id="tab-resumen" style="display:none"><div class="resumen-grid" id="resumenGrid"></div><div class="chart-wrap"><div class="chart-title">Evolución de asistencia</div><canvas id="chartCanvas" class="chart-canvas"></canvas></div><div class="section-title">Ranking de participación</div><div id="rankingList" style="margin-bottom:16px"></div><div class="section-title">Por alumno</div><div id="resumenAlumnos"></div></div>
 </div><!-- ═══════════ VIEW: PROGRAMA ═══════════ -->
 <div class="view" id="view-programa"><div class="section-title" id="programaTitleEl">Programa de la materia</div><div id="programaList"></div><button class="btn-ghost-add" onclick="showAddPrograma()">+ Agregar unidad</button>
 </div><!-- ═══════════ VIEW: CONFIG ═══════════ -->
@@ -1156,7 +1219,35 @@ select.input-field { cursor: pointer; }
 <div class="modal-backdrop" id="modalPrograma" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Nueva unidad</div><input class="input-field" id="progTitulo" placeholder="Título de la unidad"/><textarea class="input-field" id="progDesc" placeholder="Descripción / contenidos" style="min-height:60px;margin-bottom:0"></textarea><div class="btn-row mt8"><button class="btn-sm primary" onclick="confirmAddPrograma()">Agregar</button><button class="btn-sm ghost" onclick="closeModalById('modalPrograma')">Cancelar</button></div></div>
 </div><!-- Modal: Grupo -->
 <div class="modal-backdrop" id="modalGrupo" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Nuevo grupo</div><input class="input-field" id="grupoNombre" placeholder="Nombre del grupo (ej: Grupo 1)"/><div class="section-title">Seleccionar alumnos</div><div id="grupoAlumnoSelect" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:12px"></div><div class="btn-row"><button class="btn-sm primary" onclick="confirmAddGrupo()">Crear grupo</button><button class="btn-sm ghost" onclick="closeModalById('modalGrupo')">Cancelar</button></div></div>
-</div><script>
+</div>
+<!-- Modal: nota individual -->
+<div class="modal-overlay" id="modalNota" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="notaModalTitle"></div>
+    <div id="notaModalChips" style="display:flex;flex-wrap:wrap;gap:8px;margin:16px 0"></div>
+    <button onclick="confirmNotaActiva(null)" style="width:100%;padding:10px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:12px;color:var(--text3);cursor:pointer;margin-top:4px">Borrar nota</button>
+  </div>
+</div>
+
+<!-- Modal: gestión trabajos -->
+<div class="modal-overlay" id="modalGestionTrabajos" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <!-- content injected by openModalRaw -->
+  </div>
+</div>
+
+<!-- ═══════════ VIEW: EJERCICIO TRANSVERSAL ═══════════ -->
+<div class="view" id="view-transversal">
+  <div style="padding:16px 18px">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:2px;margin-bottom:4px">Ejercicio Transversal</div>
+    <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:20px">Grupos con alumnos de distintos años</div>
+    <div id="transversalBody"></div>
+  </div>
+</div>
+
+<script>
 // ══════════════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════════════
@@ -1213,6 +1304,7 @@ if (_saved && _saved.version === 3) {
   });
 }
 let state = _saved || JSON.parse(JSON.stringify(DEFAULT_STATE));
+window.state = state; // expose globally for login script
 
 // Ensure all years exist
 if (!state.papelera) state.papelera = [];
@@ -1233,6 +1325,17 @@ state.years.forEach(y => {
 if (!state.transversal) state.transversal = { grupos: [], asistencias: {} };
 save(); // persist any newly assigned PINs
 if (!state.totalClases) state.totalClases = 32;
+// Pre-load sample data so alumno PINs exist before any login attempt
+(function() {
+  const y1 = state.years[0];
+  if (y1.comisiones.length === 0) {
+    // Inline minimal sample so PINs are available immediately
+    // Full loadSampleData() runs again on unlockApp() but is idempotent
+    const _demo = [{id:'s0',nombre:'Demo',apellido:'Alumno',legajo:'LU-0000',email:'demo@ttd.edu.ar',pin:'0000'}];
+    y1.comisiones.push({id:'c1_pre',name:'Comisión A — Mañana',alumnos:_demo,asistencias:{},notas:{},grupos:[],drive:null,eventos:[]});
+    save();
+  }
+})();
 
 
 let currentYear = null, currentComision = null, currentTab = 'asistencia';
@@ -1241,6 +1344,7 @@ let parsedAlumnos = [], excelHeaders = [], excelRows = [], currentImportTab = 'm
 let obsAlumnoId = null, estadoAlumnoId = null, currentEventoType = null;
 
 function save() {
+  window.state = state;
   localStorage.setItem('ttd_v1', JSON.stringify(state));
   if (window.fbConfigured && window.fbSave && window._fbUser) {
     window.fbSave(JSON.parse(JSON.stringify(state)));
@@ -1262,10 +1366,22 @@ function ensurePin(alumno) {
 // ══════════════════════════════════════════════════════════
 function loadSampleData() {
   const y1 = state.years[0];
+  // Always ensure demo alumno exists in first comision for testing
+  const allAlumnos = y1.comisiones.flatMap(c => c.alumnos || []);
+  const hasDemo = allAlumnos.some(a => a.pin === '0000');
+  if (!hasDemo && y1.comisiones.length > 0) {
+    // Add demo student to existing first comision
+    const firstC = y1.comisiones[0];
+    if (!firstC.alumnos.some(a => a.pin === '0000')) {
+      firstC.alumnos.push({id:'s0',nombre:'Demo',apellido:'Alumno',legajo:'LU-0000',email:'demo@ttd.edu.ar',pin:'0000'});
+      save();
+    }
+  }
   if (y1.comisiones.length > 0) return;
 
   const sampleAlumnos1 = [
     // PINs auto-generated at creation time
+    {id:'s0',nombre:'Demo',apellido:'Alumno',legajo:'LU-0000',email:'demo@ttd.edu.ar',pin:'0000'},
     {id:'s1',nombre:'Valentina',apellido:'Rodríguez',legajo:'LU-0421',email:'v.rodriguez@fadu.uba.ar',pin:'1111'},
     {id:'s2',nombre:'Matías',apellido:'González',legajo:'LU-0398',email:'m.gonzalez@fadu.uba.ar'},
     {id:'s3',nombre:'Lucía',apellido:'Fernández',legajo:'LU-0455',email:'l.fernandez@fadu.uba.ar'},
@@ -1575,7 +1691,7 @@ function confirmAddComision() {
 function openComision(c) {
   currentComision = c;
   navStack = ['view-years','view-comisiones','view-comision'];
-  document.getElementById('dateInput').value = new Date().toISOString().split('T')[0];
+  document.getElementById('dateInput').value = new Date().toISOString().split('T')[0]; setTimeout(updateDateDisplay, 10);
   document.getElementById('comisionPill').textContent = `${currentYear.label} · ${c.name}`;
   if (!c.grupos) c.grupos = [];
   if (!c.eventos) c.eventos = [];
@@ -2090,7 +2206,7 @@ function renameTrabajoInline(id,nombre){const t=getTrabajos().find(x=>x.id===id)
 function setTrabajoTipo(id,tipo){const t=getTrabajos().find(x=>x.id===id);if(t){t.tipo=tipo;save();showGestionTrabajos();}}
 function setTrabajoDrive(id,url){const t=getTrabajos().find(x=>x.id===id);if(t){t.drive=url;save();}}
 function addTrabajo(){getTrabajos().push({id:'tw'+Date.now(),nombre:'Nuevo trabajo',tipo:'individual',drive:'',grupos:[]});save();showGestionTrabajos();}
-function deleteTrabajo(id){if(!confirm('¿Eliminar este trabajo?'))return;currentYear.trabajos=getTrabajos().filter(t=>t.id!==id);save();showGestionTrabajos();}
+function deleteTrabajo(id){currentYear.trabajos=getTrabajos().filter(t=>t.id!==id);save();showGestionTrabajos();toast('Trabajo eliminado');}
 function moveTrabajoUp(id){const arr=getTrabajos();const i=arr.findIndex(t=>t.id===id);if(i>0){[arr[i-1],arr[i]]=[arr[i],arr[i-1]];save();showGestionTrabajos();}}
 function moveTrabajoDown(id){const arr=getTrabajos();const i=arr.findIndex(t=>t.id===id);if(i<arr.length-1){[arr[i],arr[i+1]]=[arr[i+1],arr[i]];save();showGestionTrabajos();}}
 
@@ -2580,70 +2696,81 @@ function confirmNotaTx(valor) {
 // DRIVE
 // ══════════════════════════════════════════════════════════
 function renderDriveTab() {
-  const drive=currentComision.drive;
-  const connected=drive?.connected;
-  document.getElementById('driveNotConnected').style.display=connected?'none':'block';
-  document.getElementById('driveConnected').style.display=connected?'block':'none';
-  const badge=document.getElementById('driveStatusBadge');
-  badge.textContent=connected?'● Conectado':'No conectado';
-  badge.style.color=connected?'var(--presente)':'var(--text3)';
-  if(connected){document.getElementById('driveLastSync').textContent=drive.lastSync?`Última sync: ${new Date(drive.lastSync).toLocaleString('es-AR')}`:'Sin sincronizar';renderDriveFiles();}
-  renderEntregaList();
-}
-function driveConnect(){
-  const url=document.getElementById('driveFolderUrl').value.trim();
-  if(!url){toast('! Pegá el link');return;}
-  const match=url.match(/folders\/([a-zA-Z0-9_-]+)/);
-  if(!match){toast('! Link inválido');return;}
-  currentComision.drive={connected:true,folderId:match[1],url,files:[],lastSync:null};
-  save();toast(' Drive conectado');driveSyncNow();
-}
-async function driveSyncNow(){
-  const drive=currentComision.drive;if(!drive?.folderId)return;toast(' Sincronizando...');
-  try{
-    const res=await fetch(`https://www.googleapis.com/drive/v3/files?q='${drive.folderId}'+in+parents&fields=files(id,name,modifiedTime)&key=AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY`);
-    const data=await res.json();
-    if(data.error){drive.files=drive.files||[];drive.lastSync=new Date().toISOString();drive.simulated=true;save();renderDriveTab();toast('! Carpeta privada — modo manual');return;}
-    drive.files=(data.files||[]).map(f=>({id:f.id,name:f.name,modifiedTime:f.modifiedTime}));drive.lastSync=new Date().toISOString();drive.simulated=false;
-    save();autoMatchEntregas();renderDriveTab();toast(` ${drive.files.length} archivos`);
-  }catch(e){drive.lastSync=new Date().toISOString();save();renderDriveTab();toast('! Error de conexión');}
-}
-function autoMatchEntregas(){
-  const drive=currentComision.drive;if(!drive?.files?.length)return;
-  if(!currentComision.notas)currentComision.notas={};
-  currentComision.alumnos.forEach(a=>{
-    const nom=(a.nombre||'').toLowerCase(),ape=(a.apellido||'').toLowerCase(),leg=(a.legajo||'').toLowerCase();
-    const match=drive.files.some(f=>{const fn=f.name.toLowerCase();return(ape&&fn.includes(ape))||(nom&&nom.length>2&&fn.includes(nom))||(leg&&fn.includes(leg));});
-    if(match){if(!currentComision.notas[a.id])currentComision.notas[a.id]={};currentComision.notas[a.id].entregado=true;}
-  });save();
-}
-function renderDriveFiles(){
-  const drive=currentComision.drive;const fl=document.getElementById('driveFileList');
-  if(!drive?.files?.length){fl.innerHTML=drive?.simulated?'<div class="info-box">Carpeta privada. Marcá entregas manualmente.</div>':'<div style="font-size:13px;color:var(--text3)">Sin archivos aún.</div>';return;}
-  let html=`<div style="font-size:10px;color:var(--text3);margin-bottom:6px;font-family:\'DM Mono\',monospace;text-transform:uppercase;letter-spacing:1px">${drive.files.length} archivos</div>`;
-  drive.files.slice(0,8).forEach(f=>{html+=`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px"><span style="color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px"> ${f.name}</span><span style="font-size:11px;color:var(--text3);flex-shrink:0">${new Date(f.modifiedTime).toLocaleDateString('es-AR')}</span></div>`;});
-  if(drive.files.length>8)html+=`<div style="font-size:12px;color:var(--text3);padding:6px 0">...y ${drive.files.length-8} más</div>`;
-  fl.innerHTML=html;
-}
-function renderEntregaList(){
-  const container=document.getElementById('entregaAlumnoList');const notas=currentComision.notas||{};
-  const sorted=sortedAlumnos();if(!sorted.length){container.innerHTML='<div class="empty">Sin alumnos.</div>';return;}
-  container.innerHTML='';
-  sorted.forEach(a=>{
-    const entregado=notas[a.id]?.entregado||false;const si=subInfo(a);
-    const row=document.createElement('div');row.className='alumno-row';row.style.padding='12px 16px';
-    row.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between"><div><div class="alumno-name" style="font-size:13px">${displayName(a)}</div>${si?`<div class="alumno-info">${si}</div>`:''}
-          ${a.pin?`<div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3);margin-top:3px;letter-spacing:1px">PIN estudiante: <strong style="color:var(--text2);letter-spacing:2px">${a.pin}</strong></div>`:''}</div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex-shrink:0"><span style="padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;${entregado?'background:rgba(0,229,200,.2);color:var(--teal)':'background:rgba(100,100,120,.15);color:var(--text3)'}" id="ebadge_${a.id}">${entregado?' Entregado':'Pendiente'}</span><input type="checkbox" ${entregado?'checked':''} onchange="toggleEntrega('${a.id}',this.checked)" style="width:18px;height:18px;accent-color:var(--ttd)"></label></div>`;
-    container.appendChild(row);
+  const container = document.getElementById('tab-drive');
+  const trabajos = getTrabajos();
+  const notas = currentComision.notas || {};
+  const alumnos = sortedAlumnos();
+
+  const trabajosCon = trabajos.filter(t => t.drive && t.drive.trim());
+  let html = '';
+  if (!trabajosCon.length) {
+    container.innerHTML = '<div class="empty">Sin trabajos con link de Drive. Agregá uno en Notas → Editar trabajos.</div>'; return;
+  }
+  // Only show trabajos with Drive link
+  const trabajosSinDrive = trabajos.filter(t => !t.drive || !t.drive.trim()).length;
+  if (trabajosSinDrive > 0) html += '<div class="info-box" style="margin-bottom:12px;font-size:11px">' + trabajosSinDrive + ' trabajo' + (trabajosSinDrive>1?'s sin':'  sin') + ' link de Drive oculto' + (trabajosSinDrive>1?'s':'') + '.</div>';
+
+
+  trabajosCon.forEach(t => {
+    const driveLink = t.drive
+      ? `<a href="${t.drive}" target="_blank" style="display:inline-flex;align-items:center;gap:5px;font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);text-decoration:none;margin-left:10px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Drive</a>` : '';
+    const tipoBadge = t.tipo === 'grupal'
+      ? `<span style="font-size:10px;background:rgba(255,92,0,.12);color:var(--ttd);border:1px solid rgba(255,92,0,.25);border-radius:10px;padding:2px 7px;font-family:'DM Mono',monospace">grupal</span>`
+      : `<span style="font-size:10px;background:var(--surface);color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:2px 7px;font-family:'DM Mono',monospace">individual</span>`;
+    const entregados = alumnos.filter(a => notas[a.id]?.[t.id+'_entrega']).length;
+
+    html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:.5px">${t.nombre}</span>
+          ${tipoBadge}${driveLink}
+        </div>
+        <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3)">${entregados}/${alumnos.length}</span>
+      </div>`;
+
+    if (!alumnos.length) {
+      html += '<div style="padding:12px 16px;font-size:13px;color:var(--text3)">Sin alumnos.</div>';
+    } else {
+      alumnos.forEach(a => {
+        const entregado = notas[a.id]?.[t.id+'_entrega'] || false;
+        html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-size:13px;font-weight:600">${displayName(a)}</div>
+            ${a.legajo ? `<div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3)">${a.legajo}</div>` : ''}
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <span id="dbadge_${t.id}_${a.id}" style="padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;${entregado?'background:rgba(0,229,200,.2);color:var(--teal)':'background:rgba(100,100,120,.12);color:var(--text3)'}">${entregado ? 'Entregado' : 'Pendiente'}</span>
+            <input type="checkbox" ${entregado?'checked':''} onchange="toggleDriveEntrega('${t.id}','${a.id}',this.checked)" style="width:18px;height:18px;accent-color:var(--ttd)">
+          </label>
+        </div>`;
+      });
+    }
+    html += '</div>';
   });
+
+  container.innerHTML = html;
 }
-function toggleEntrega(id,checked){
-  if(!currentComision.notas)currentComision.notas={};if(!currentComision.notas[id])currentComision.notas[id]={};
-  currentComision.notas[id].entregado=checked;
-  const b=document.getElementById('ebadge_'+id);
-  if(b){b.textContent=checked?' Entregado':'Pendiente';b.style.cssText=checked?'padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(0,229,200,.2);color:var(--teal)':'padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(100,100,120,.15);color:var(--text3)';}
+
+function toggleDriveEntrega(trabajoId, alumnoId, checked) {
+  if (!currentComision.notas) currentComision.notas = {};
+  if (!currentComision.notas[alumnoId]) currentComision.notas[alumnoId] = {};
+  currentComision.notas[alumnoId][trabajoId+'_entrega'] = checked;
+  const b = document.getElementById(`dbadge_${trabajoId}_${alumnoId}`);
+  if (b) {
+    b.textContent = checked ? 'Entregado' : 'Pendiente';
+    b.style.cssText = checked
+      ? 'padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(0,229,200,.2);color:var(--teal)'
+      : 'padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(100,100,120,.12);color:var(--text3)';
+  }
   save();
 }
+
+function driveConnect(){ toast('Agregá links de Drive en Notas → Editar trabajos.'); }
+async function driveSyncNow(){ toast('Marcá entregas manualmente.'); }
+function autoMatchEntregas(){}
+function renderDriveFiles(){}
+function renderEntregaList(){}
+function toggleEntrega(id,checked){ toggleDriveEntrega('tw1', id, checked); }
 
 // ══════════════════════════════════════════════════════════
 // CALENDARIO
@@ -2990,34 +3117,6 @@ function exportPDF(){
     return`<tr><td>${displayName(a)}</td><td>${a.legajo||'—'}</td><td style="color:${pct!==null&&pct<75?'#cc1f1f':'inherit'}">${pct!==null?pct+'%':'—'}</td><td>${n.participacion??'—'}</td><td>${n.trabajos??'—'}</td><td>${n.final??'—'}</td><td>${n.entregado?'Si':'—'}</td><td>${n.estado||'cursando'}</td></tr>`;
   }).join('');
   w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>TTD — ${currentComision.name}</title><style>body{font-family:Arial,sans-serif;padding:30px;font-size:12px}h1{font-size:18px;margin-bottom:4px}h2{font-size:14px;color:#666;margin-bottom:20px;font-weight:normal}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:7px 10px;text-align:left}th{background:#f0f0ee;font-weight:600}tr:nth-child(even){background:#fafafa}.footer{margin-top:20px;font-size:11px;color:#999}</style></head><body><h1>TTD — ${currentComision.name}</h1><h2>${currentYear?.label||''} · Generado el ${new Date().toLocaleDateString('es-AR')}</h2><table><thead><tr><th>Alumno</th><th>Legajo</th><th>Asist.</th><th>Participación</th><th>Trabajos</th><th>Final</th><th>Entrega</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table><div class="footer">TTD — Taller Transversal de Diseño</div>
-<!-- Modal: nota individual -->
-<div class="modal-overlay" id="modalNota" onclick="closeModal(event)">
-  <div class="modal">
-    <div class="modal-handle"></div>
-    <div class="modal-title" id="notaModalTitle"></div>
-    <div id="notaModalChips" style="display:flex;flex-wrap:wrap;gap:8px;margin:16px 0"></div>
-    <button onclick="confirmNotaActiva(null)" style="width:100%;padding:10px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:12px;color:var(--text3);cursor:pointer;margin-top:4px">Borrar nota</button>
-  </div>
-</div>
-
-<!-- Modal: gestión trabajos -->
-<div class="modal-overlay" id="modalGestionTrabajos" onclick="closeModal(event)">
-  <div class="modal">
-    <div class="modal-handle"></div>
-    <!-- content injected by openModalRaw -->
-  </div>
-</div>
-
-
-<!-- ═══════════ VIEW: EJERCICIO TRANSVERSAL ═══════════ -->
-<div class="view" id="view-transversal">
-  <div style="padding:16px 18px">
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:2px;margin-bottom:4px">Ejercicio Transversal</div>
-    <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:20px">Grupos con alumnos de distintos años</div>
-    <div id="transversalBody"></div>
-  </div>
-</div>
-
 </body></html>`);
   w.document.close();setTimeout(()=>w.print(),300);
   toast('PDF generado');
@@ -3042,7 +3141,26 @@ function toast(msg){
   const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),2400);
 }
-document.getElementById('dateInput').addEventListener('change',renderAlumnos);
+// dateInput onchange handled inline
+function updateDateDisplay() {
+  var val = document.getElementById('dateInput').value;
+  var disp = document.getElementById('dateDisplay');
+  if (!val || !disp) return;
+  var d = new Date(val + 'T12:00:00');
+  var dow = d.getDay(); // 0=Dom,1=Lun,4=Jue
+  var isClase = (dow === 1 || dow === 4);
+  var dayNames = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  var months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  disp.textContent = dayNames[dow] + ' ' + d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+  disp.style.background = isClase ? 'rgba(255,92,0,.10)' : 'var(--surface)';
+  disp.style.borderColor = isClase ? 'rgba(255,92,0,.5)' : 'var(--border)';
+  disp.style.color = isClase ? 'var(--ttd)' : 'var(--text)';
+}
+// Init date display on load
+window.addEventListener('load', function() {
+  var di = document.getElementById('dateInput');
+  if (di && di.value) updateDateDisplay();
+});
 
 // Bind showView buttons correctly
 document.querySelectorAll('[onclick="showView(\'view-programa\')"]').forEach(el=>{
@@ -3055,9 +3173,121 @@ document.querySelectorAll('[onclick="showView(\'view-config\')"]').forEach(el=>{
 // ══════════════════════════════════════════════════════════
 // STUDENT MODE
 // ══════════════════════════════════════════════════════════
+function renderStudentView(alumno, year, comision) {
+  const body = document.getElementById('studentBody');
+  const trabajos = (year && year.trabajos) ? year.trabajos : [];
+  const notas = (comision && comision.notas && comision.notas[alumno.id]) || {};
+  const asist = comision ? comision.asistencias || {} : {};
+  const fechas = Object.keys(asist);
+  let presentes = 0, tardes = 0, ausentes = 0;
+  fechas.forEach(function(f) {
+    const v = asist[f][alumno.id];
+    if (v === 'P') presentes++;
+    else if (v === 'T') tardes++;
+    else if (v === 'A') ausentes++;
+  });
+  const total = presentes + tardes + ausentes;
+  const pct = total ? Math.round(((presentes + tardes * 0.5) / total) * 100) : null;
+  const pctColor = pct === null ? 'var(--text3)' : pct >= 75 ? 'var(--teal)' : 'var(--ausente)';
+  const notasHTML = trabajos.map(function(t) {
+    const n = notas[t.id];
+    const val = n ? n.valor : '—';
+    const hasVal = !!(n && n.valor);
+    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">'
+      + '<span style="font-size:13px;color:var(--text2)">' + t.nombre + '</span>'
+      + '<span style="font-family:DM Mono,monospace;font-size:14px;font-weight:700;color:' + (hasVal ? 'var(--text)' : 'var(--text3)') + '">' + val + '</span>'
+      + '</div>';
+  }).join('');
+  body.innerHTML = '<div style="padding:20px 18px">'
+    + '<div style="margin-bottom:20px">'
+    + '<div style="font-family:Bebas Neue,sans-serif;font-size:26px;letter-spacing:1px">' + (alumno.apellido ? alumno.apellido + ', ' + alumno.nombre : alumno.nombre) + '</div>'
+    + '<div style="font-family:DM Mono,monospace;font-size:11px;color:var(--text3);margin-top:2px">' + (comision ? year.label + ' · ' + comision.name : '') + '</div>'
+    + '</div>'
+    + '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px">'
+    + '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Asistencia</div>'
+    + '<div style="display:flex;gap:16px;align-items:center">'
+    + '<div style="font-family:Bebas Neue,sans-serif;font-size:36px;color:' + pctColor + '">' + (pct !== null ? pct + '%' : '—') + '</div>'
+    + '<div style="font-family:DM Mono,monospace;font-size:11px;color:var(--text3);line-height:1.8">' + presentes + 'P · ' + tardes + 'T · ' + ausentes + 'A<br>' + total + ' clases</div>'
+    + '</div></div>'
+    + '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px">'
+    + '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Notas</div>'
+    + (notasHTML || '<div style="font-size:13px;color:var(--text3);padding:8px 0">Sin notas cargadas.</div>')
+    + '</div></div>';
+  // Calendar section
+  const eventos = comision ? (comision.eventos || []) : [];
+  const eventDates = {};
+  eventos.forEach(function(e){ eventDates[e.fecha] = e; });
+  const asistDates = Object.keys(asist);
+  
+  // Build 4-month mini calendar (Feb-May 2026 typical cuatrimestre)
+  var now = new Date();
+  var startMonth = now.getMonth(); // show current month + next
+  var startYear = now.getFullYear();
+  
+  function buildStudentCal(yr, mo) {
+    var mNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    var d = new Date(yr, mo, 1);
+    var firstDay = (d.getDay()+6)%7;
+    var daysInMonth = new Date(yr,mo+1,0).getDate();
+    var today = new Date();
+    var h = '<div style="margin-bottom:18px">';
+    h += '<div style="font-family:DM Mono,monospace;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:8px">' + mNames[mo] + ' ' + yr + '</div>';
+    h += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center">';
+    ['Lu','Ma','Mi','Ju','Vi','Sá','Do'].forEach(function(dn){ h += '<div style="font-size:9px;color:var(--text3);padding:2px 0;font-family:DM Mono,monospace">' + dn + '</div>'; });
+    for(var i=0;i<firstDay;i++) h += '<div></div>';
+    for(var day=1;day<=daysInMonth;day++){
+      var ds = yr+'-'+String(mo+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+      var ev = eventDates[ds];
+      var dow = new Date(ds+'T12:00:00').getDay();
+      var isClaseDay = (dow===1||dow===4);
+      var isToday = today.getFullYear()===yr&&today.getMonth()===mo&&today.getDate()===day;
+      var myAsist = asist[ds] ? asist[ds][alumno.id] : null;
+      var bg='transparent', color='var(--text)', border='none', fontW='400';
+      if (ev && ev.tipo==='clase') { bg='var(--ttd)'; color='#fff'; fontW='700'; }
+      else if (ev && ev.tipo==='feriado') { bg='var(--ausente)'; color='#fff'; }
+      else if (ev && (ev.tipo==='invitado'||ev.tipo==='entrega')) { bg='rgba(100,100,120,.18)'; color='var(--text2)'; }
+      else if (isClaseDay) { bg='#f0f0ee'; color='var(--text2)'; }
+      if (isToday) { border='2px solid var(--ttd)'; }
+      // Personal attendance overlay
+      var asistDot = '';
+      if (myAsist==='P') asistDot='<div style="width:4px;height:4px;border-radius:50%;background:#00e5c8;margin:0 auto;margin-top:-2px"></div>';
+      else if (myAsist==='T') asistDot='<div style="width:4px;height:4px;border-radius:50%;background:#ffb347;margin:0 auto;margin-top:-2px"></div>';
+      else if (myAsist==='A') asistDot='<div style="width:4px;height:4px;border-radius:50%;background:var(--ausente);margin:0 auto;margin-top:-2px"></div>';
+      h += '<div style="border-radius:4px;padding:3px 1px;background:' + bg + ';color:' + color + ';font-size:11px;font-weight:' + fontW + ';border:' + border + ';box-sizing:border-box">' + day + asistDot + '</div>';
+    }
+    h += '</div></div>';
+    return h;
+  }
+  
+  var calHTML = '';
+  for(var m=0; m<3; m++){
+    var mo = (startMonth + m) % 12;
+    var yr = startYear + Math.floor((startMonth + m) / 12);
+    calHTML += buildStudentCal(yr, mo);
+  }
+  
+  body.innerHTML += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin:0 18px 20px">'
+    + '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:14px">Calendario</div>'
+    + calHTML
+    + '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px">'
+    + '<div style="display:flex;align-items:center;gap:5px"><div style="width:9px;height:9px;border-radius:2px;background:var(--ttd)"></div><span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">Clase</span></div>'
+    + '<div style="display:flex;align-items:center;gap:5px"><div style="width:4px;height:4px;border-radius:50%;background:#00e5c8"></div><span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">Presente</span></div>'
+    + '<div style="display:flex;align-items:center;gap:5px"><div style="width:4px;height:4px;border-radius:50%;background:#ffb347"></div><span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">Tarde</span></div>'
+    + '<div style="display:flex;align-items:center;gap:5px"><div style="width:4px;height:4px;border-radius:50%;background:var(--ausente)"></div><span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">Ausente</span></div>'
+    + '</div></div>';
+
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('studentScreen').classList.add('open');
+}
+
 function fbLogoutAndReset() {
+  window._intentionalLogout = true;
+  setTimeout(function(){ window._intentionalLogout = false; }, 4000);
   if (window.fbLogout) window.fbLogout();
-  else showLoginScreen();
+  window._fbUser = null;
+  window._appUnlocked = false;
+  showLoginScreen();
+  loginSetMode('alumno');
 }
 </script>
 </body>
