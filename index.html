@@ -1157,6 +1157,10 @@ select.input-field { cursor: pointer; }
             window._userProfile = {rol:'admin', years:[1,2,3,4,5]};
           }
         } catch(e) { window._userProfile = null; }
+        // Unlock app directly — don't rely on onAuthStateChanged (may be blocked by _loggedOut)
+        window._loggedOut = false;
+        window._intentionalLogout = false;
+        if (typeof unlockApp === 'function') unlockApp();
         return null; // no error
       } catch(e) {
         window._fbUser = null;
