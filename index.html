@@ -200,6 +200,8 @@ function showLoginScreen() {
     if (ls2 && !window._appUnlocked) ls2.style.display = 'flex';
   }, 200);
   document.getElementById('studentScreen').classList.remove('open');
+  var ps2 = document.getElementById('pendingScreen');
+  if (ps2) ps2.style.display = 'none';
   var loadSc = document.getElementById('loadingScreen');
   if (loadSc) loadSc.style.display = 'none';
   window.scrollTo(0, 0);
@@ -227,12 +229,21 @@ function showLoginScreen() {
 }
 
 function unlockApp() {
-  window._loggedOut = false;      // user successfully logged in — re-enable Firebase events
+  // Check if user is pending approval
+  var profile = window._userProfile;
+  if (profile && profile.rol === 'pendiente') {
+    var ps = document.getElementById('pendingScreen');
+    if (ps) { ps.style.display = 'flex'; }
+    var ls = document.getElementById('loginScreen');
+    if (ls) ls.style.display = 'none';
+    return;
+  }
+  window._loggedOut = false;
   window._intentionalLogout = false;
   window._appUnlocked = true;
-  const ls = document.getElementById('loginScreen');
-  if (ls) ls.style.display = 'none';
-  const loading = document.getElementById('loadingScreen');
+  var ls2 = document.getElementById('loginScreen');
+  if (ls2) ls2.style.display = 'none';
+  var loading = document.getElementById('loadingScreen');
   if (loading) loading.style.display = 'none';
   document.getElementById('mainHeader').style.display = 'flex';
   loadSampleData();
@@ -1305,9 +1316,14 @@ select.input-field { cursor: pointer; }
       <input id="loginEmail" type="email" placeholder="Email" autocomplete="email"
         style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box"
         onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()"/>
-      <input id="loginPass" type="password" placeholder="Contraseña" autocomplete="current-password"
-        style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box"
-        onkeydown="if(event.key==='Enter')docenteLogin()"/>
+      <div style="position:relative">
+        <input id="loginPass" type="password" placeholder="Contraseña" autocomplete="current-password"
+          style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 44px 12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box"
+          onkeydown="if(event.key==='Enter')docenteLogin()"/>
+        <button type="button" onclick="var i=document.getElementById('loginPass');i.type=i.type==='password'?'text':'password'" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text3);padding:4px">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
       <button id="loginDocenteBtn" onclick="docenteLogin()"
         style="width:100%;padding:13px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:'Bebas Neue','Arial Black',sans-serif;font-size:18px;letter-spacing:1.5px;cursor:pointer">
         Ingresar
@@ -1350,6 +1366,14 @@ select.input-field { cursor: pointer; }
 </div>
 
 <div id="pinScreen" style="display:none"><!-- retired --></div>
+<!-- ═══════════ PENDING SCREEN ═══════════ -->
+<div id="pendingScreen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:550;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center">
+  <div style="font-family:'Bebas Neue',sans-serif;font-size:48px;color:var(--ttd);letter-spacing:4px">TTD</div>
+  <div style="width:8px;height:8px;border-radius:50%;background:var(--ttd);margin:8px auto 12px"></div>
+  <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px;margin-bottom:12px">Cuenta pendiente</div>
+  <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--text3);max-width:280px;line-height:1.6;margin-bottom:32px">Tu registro fue recibido. El administrador debe aprobarte el acceso antes de que puedas ingresar.</div>
+  <button onclick="fbLogoutAndReset()" style="padding:12px 32px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;cursor:pointer;color:var(--text2)">Cerrar sesión</button>
+</div>
 <!-- ═══════════ STUDENT VIEW ═══════════ -->
 <div id="studentScreen">
   <div class="student-header">
@@ -1383,23 +1407,20 @@ select.input-field { cursor: pointer; }
 </div><!-- ═══════════ VIEW: COMISIONES ═══════════ -->
 <div class="view" id="view-comisiones"><div id="proximaClaseBanner"></div><div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="section-title" id="comisTitle" style="margin-bottom:0"></div><button onclick="showYearCompleto()" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);background:none;border:1px solid rgba(255,92,0,.3);border-radius:20px;padding:4px 12px;cursor:pointer">Ver año completo</button></div><div id="comisionList"></div><button class="btn-ghost-add" onclick="showAddComision()">+ Nueva comisión</button>
 
-  <button onclick="fbLogoutAndReset()" title="Cerrar sesión" style="background:none;border:none;cursor:pointer;color:var(--text3);padding:4px;display:flex;align-items:center">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-  </button>
 </div><!-- ═══════════ VIEW: COMISION DETAIL ═══════════ -->
 <div class="view" id="view-comision"><div class="pill" id="comisionPill"></div><div class="tabs" id="mainTabs"><div class="tab active" onclick="switchTab('asistencia')">Asist.</div><div class="tab" onclick="switchTab('notas')">Notas</div><div class="tab" onclick="switchTab('grupos')">Grupos</div><div class="tab" onclick="switchTab('drive')">Drive</div><div class="tab" onclick="switchTab('calendario')">Cal.</div><div class="tab" onclick="switchTab('historial')">Hist.</div><div class="tab" onclick="switchTab('resumen')">Resumen</div></div><!-- ASISTENCIA --><div id="tab-asistencia"><div id="contadorReg" style="margin-bottom:12px"></div><div class="date-bar">
   <span class="date-label">Clase del</span>
-  <label for="dateInput" style="position:relative;display:inline-block;cursor:pointer">
-    <input type="date" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:3;border:none" onchange="updateDateDisplay();renderAlumnos();">
-    <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);cursor:pointer;min-width:120px;text-align:center">—</div>
-  </label>
+  <div style="position:relative;display:inline-block;cursor:pointer" onclick="var di=document.getElementById('dateInput');try{di.showPicker()}catch(e){di.click()}">
+    <input type="date" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2;border:none" onchange="updateDateDisplay();renderAlumnos();">
+    <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);cursor:pointer;min-width:120px;text-align:center;position:relative;z-index:1">—</div>
+  </div>
 </div><div id="alertasComision" style="margin-bottom:10px"></div><div id="alumnoList"></div><div class="action-row"><button class="btn-secondary" onclick="showModalAlumno()">+ Alumno</button><button class="btn-secondary" onclick="exportCSV()">↓ CSV</button><button class="btn-secondary" onclick="exportPDF()">↓ PDF</button></div></div><!-- NOTAS --><div id="tab-notas" style="display:none"><div id="notasList"></div><button class="btn-primary" onclick="saveNotas()">Guardar notas</button></div><!-- GRUPOS --><div id="tab-grupos" style="display:none"><div id="gruposList"></div><button class="btn-ghost-add mt8" onclick="showAddGrupo()">+ Nuevo grupo</button></div><!-- DRIVE --><div id="tab-drive" style="display:none"><div class="info-box"> Conectá una carpeta pública de Google Drive para detectar entregas automáticamente.</div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-weight:600;font-size:14px"> Google Drive</span><span id="driveStatusBadge" style="font-size:11px;color:var(--text3)">No conectado</span></div><div id="driveNotConnected"><input class="input-field" type="text" id="driveFolderUrl" placeholder="https://drive.google.com/drive/folders/..." style="margin-bottom:8px"/><button class="btn-primary" style="margin-top:0" onclick="driveConnect()">Conectar carpeta</button></div><div id="driveConnected" style="display:none"><div style="font-size:12px;color:var(--text3);margin-bottom:10px" id="driveLastSync"></div><button class="btn-secondary" onclick="driveSyncNow()" style="width:100%;justify-content:center">Sincronizar</button><div id="driveFileList" style="margin-top:12px"></div></div></div><div class="section-title mt16">Entregas por alumno</div><div id="entregaAlumnoList"></div><button class="btn-primary" onclick="saveNotas()">Guardar</button></div><!-- CALENDARIO --><div id="tab-calendario" style="display:none"><div id="calendarWidget"></div><div class="action-row"><button class="btn-secondary" onclick="showAddEvento('clase')" style="flex:1;justify-content:center">+ Clase</button><button class="btn-secondary" onclick="showAddEvento('invitado')" style="flex:1;justify-content:center">+ Invitado</button><button class="btn-secondary" onclick="showAddEvento('entrega')" style="flex:1;justify-content:center">+ Entrega</button><button class="btn-secondary" onclick="showAddEvento('feriado')" style="flex:1;justify-content:center">+ Feriado</button></div><div class="cal-event-list" id="calEventList"></div><div id="calImportArea"></div></div><!-- HISTORIAL --><div id="tab-historial" style="display:none"><div id="historialList"></div></div><!-- RESUMEN --><div id="tab-resumen" style="display:none"><div class="resumen-grid" id="resumenGrid"></div><div class="chart-wrap"><div class="chart-title">Evolución de asistencia</div><canvas id="chartCanvas" class="chart-canvas"></canvas></div><div class="section-title">Ranking de participación</div><div id="rankingList" style="margin-bottom:16px"></div><div class="section-title">Por alumno</div><div id="resumenAlumnos"></div></div>
 </div><!-- ═══════════ VIEW: PROGRAMA ═══════════ -->
 <div class="view" id="view-programa"><div class="section-title" id="programaTitleEl">Programa de la materia</div><div id="programaList"></div><button class="btn-ghost-add" onclick="showAddPrograma()">+ Agregar unidad</button>
 </div><!-- ═══════════ VIEW: CONFIG ═══════════ -->
 <div class="view" id="view-config"><div class="section-title">Configuración</div>
   <div id="adminPanel" style="margin-bottom:16px"></div>
-  <div id="fbUserInfo" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center"><span id="fbUserEmail"></span><button onclick="fbLogoutAndReset()" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:11px;color:var(--ausente);cursor:pointer;padding:0">Cerrar sesión</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> PIN de acceso</div><input class="input-field" id="newPin1" type="password" inputmode="numeric" maxlength="4" placeholder="Nuevo PIN (4 dígitos)" /><input class="input-field" id="newPin2" type="password" inputmode="numeric" maxlength="4" placeholder="Confirmar PIN" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="changePin()">Cambiar PIN</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> Sistema de notas</div><div style="font-size:13px;color:var(--text2);margin-bottom:10px">Sistema global para todas las comisiones</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:10px;cursor:pointer"><input type="radio" name="notaSys" value="numerico" id="sysNum" style="accent-color:var(--ttd)"><span style="font-size:14px">Numérico (1–10)</span></label><label style="display:flex;align-items:center;gap:10px;margin-bottom:10px;cursor:pointer"><input type="radio" name="notaSys" value="conceptual" id="sysCon" style="accent-color:var(--ttd)"><span style="font-size:14px">Conceptual</span></label><label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="radio" name="notaSys" value="ambos" id="sysBoth" style="accent-color:var(--ttd)"><span style="font-size:14px">Ambos (elegir por campo)</span></label><button class="btn-primary" style="margin-top:12px" onclick="saveConfig()">Guardar configuración</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> Regularidad</div><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px">Total de clases del cuatrimestre</label><input class="input-field" id="totalClases" type="number" min="1" max="60" placeholder="Ej: 32" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="saveTotalClases()">Guardar</button></div><div style="background:rgba(255,77,106,.07);border:1px solid rgba(255,77,106,.2);border-radius:var(--radius);padding:16px"><div style="font-weight:600;margin-bottom:8px;font-family:'Bebas Neue',sans-serif;color:var(--ausente)"> Papelera de alumnos</div><div style="font-size:13px;color:var(--text2);margin-bottom:10px">Alumnos eliminados guardados como respaldo</div><div id="papeleraList"></div></div>
+  <div id="fbUserInfo" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center"><span id="fbUserEmail"></span><button onclick="fbLogoutAndReset()" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:11px;color:var(--ausente);cursor:pointer;padding:0">Cerrar sesión</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> PIN de acceso</div><input class="input-field" id="newPin1" type="password" inputmode="numeric" maxlength="4" placeholder="Nuevo PIN (4 dígitos)" /><input class="input-field" id="newPin2" type="password" inputmode="numeric" maxlength="4" placeholder="Confirmar PIN" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="changePin()">Cambiar PIN</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> Regularidad</div><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px">Total de clases del cuatrimestre</label><input class="input-field" id="totalClases" type="number" min="1" max="60" placeholder="Ej: 32" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="saveTotalClases()">Guardar</button></div><div style="background:rgba(255,77,106,.07);border:1px solid rgba(255,77,106,.2);border-radius:var(--radius);padding:16px"><div style="font-weight:600;margin-bottom:8px;font-family:'Bebas Neue',sans-serif;color:var(--ausente)"> Papelera de alumnos</div><div style="font-size:13px;color:var(--text2);margin-bottom:10px">Alumnos eliminados guardados como respaldo</div><div id="papeleraList"></div></div>
 </div>
 <!-- ═══════════ VIEW: AÑO COMPLETO ═══════════ -->
 <div class="view" id="view-year-completo">
@@ -2514,8 +2535,17 @@ function renderCriteriosEdit(t) {
   }).join('');
 }
 
+function _getTrabajoDirecto(trabajoId) {
+  // Returns direct reference to trabajo in state (not a copy)
+  var found = null;
+  (state.years||[]).forEach(function(y){
+    (y.trabajos||[]).forEach(function(t){ if(t.id===trabajoId) found=t; });
+  });
+  return found;
+}
+
 function addCriterio(trabajoId) {
-  var t = getTrabajos().find(function(x){ return x.id === trabajoId; });
+  var t = _getTrabajoDirecto(trabajoId);
   if (!t) return;
   if (!t.criterios) t.criterios = [];
   t.criterios.push({id:'cr'+Date.now(), nombre:'Nuevo criterio'});
@@ -2525,14 +2555,14 @@ function addCriterio(trabajoId) {
 }
 
 function renameCriterio(trabajoId, criterioId, nombre) {
-  var t = getTrabajos().find(function(x){ return x.id === trabajoId; });
+  var t = _getTrabajoDirecto(trabajoId);
   if (!t) return;
   var cr = (t.criterios||[]).find(function(c){ return c.id === criterioId; });
   if (cr) { cr.nombre = nombre; save(); }
 }
 
 function deleteCriterio(trabajoId, criterioId) {
-  var t = getTrabajos().find(function(x){ return x.id === trabajoId; });
+  var t = _getTrabajoDirecto(trabajoId);
   if (!t) return;
   t.criterios = (t.criterios||[]).filter(function(c){ return c.id !== criterioId; });
   save();
@@ -2540,57 +2570,58 @@ function deleteCriterio(trabajoId, criterioId) {
   if (container) container.innerHTML = renderCriteriosEdit(t);
 }
 
-// Open expanded nota modal with criterios + multi-docente + nota final
+// Open expanded nota modal with criterios + nota final
 function openNotaExpandida(alumnoId, trabajoId) {
-  var t = getTrabajos().find(function(x){ return x.id === trabajoId; });
-  var a = currentComision.alumnos.find(function(x){ return x.id === alumnoId; });
+  var t = _getTrabajoDirecto(trabajoId) || getTrabajos().find(function(x){ return x.id===trabajoId; });
+  var a = currentComision.alumnos.find(function(x){ return x.id===alumnoId; });
   if (!t || !a) return;
-  var notas = (currentComision.notas||{})[alumnoId] || {};
-  var notaFinal = notas[trabajoId] ? notas[trabajoId].valor : '';
-  var docente = window._userProfile ? (window._userProfile.nombre||window._fbUser?.email||'Docente') : 'Docente';
 
-  // Criterios section
-  var criteriosHTML = '';
-  if (t.criterios && t.criterios.length) {
-    criteriosHTML = '<div style="margin-bottom:12px"><div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Criterios</div>';
-    t.criterios.forEach(function(cr) {
-      var crVal = (notas[trabajoId + '_cr_' + cr.id]) || '';
-      criteriosHTML += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">'
-        + '<span style="font-size:13px;color:var(--text2)">' + cr.nombre + '</span>'
-        + '<input type="text" inputmode="decimal" value="' + crVal + '" onchange="setCriterioNota(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ',' + JSON.stringify(cr.id) + ',this.value)" style="width:50px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:13px;font-family:DM Mono,monospace">'
-        + '</div>';
+  // Store context for chip updates
+  window._notaExpandida = {alumnoId: alumnoId, trabajoId: trabajoId};
+
+  function buildHTML() {
+    var notas = (currentComision.notas||{})[alumnoId] || {};
+    var notaFinal = notas[trabajoId] ? notas[trabajoId].valor : null;
+    var chips = (state.notaSistema === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
+
+    // Criterios section
+    var criteriosHTML = '';
+    if (t.criterios && t.criterios.length) {
+      criteriosHTML += '<div style="margin-bottom:14px"><div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Criterios</div>';
+      t.criterios.forEach(function(cr) {
+        var crVal = notas[trabajoId + '_cr_' + cr.id] || '';
+        criteriosHTML += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">'
+          + '<span style="font-size:13px;color:var(--text2)">' + cr.nombre + '</span>'
+          + '<input type="text" inputmode="decimal" value="' + crVal + '" onblur="setCriterioNota(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ',' + JSON.stringify(cr.id) + ',this.value)" style="width:55px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:14px;font-family:DM Mono,monospace">'
+          + '</div>';
+      });
+      criteriosHTML += '</div>';
+    }
+
+    // Nota final chips
+    var chipsHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">';
+    chips.forEach(function(v) {
+      var active = notaFinal !== null && String(v) === String(notaFinal);
+      chipsHTML += '<button onclick="setNotaFinalDirecta(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ',' + JSON.stringify(String(v)) + ')" style="padding:8px 14px;border-radius:20px;font-size:14px;font-family:DM Mono,monospace;cursor:pointer;border:1px solid ' + (active?'var(--ttd)':'var(--border)') + ';background:' + (active?'var(--ttd)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + ';font-weight:' + (active?'700':'400') + '">' + v + '</button>';
     });
-    criteriosHTML += '</div>';
+    chipsHTML += '</div>';
+    if (notaFinal) {
+      chipsHTML += '<button onclick="setNotaFinalDirecta(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ',null)" style="font-size:11px;font-family:DM Mono,monospace;color:var(--text3);background:none;border:none;cursor:pointer;padding:2px 0">Borrar nota</button>';
+    }
+
+    return '<div class="modal-title">' + t.nombre + ' — ' + displayName(a) + '</div>'
+      + criteriosHTML
+      + '<div style="border-top:' + (t.criterios&&t.criterios.length?'2px':'1px') + ' solid var(--border);padding-top:12px;margin-top:4px">'
+      + '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Nota final' + (notaFinal?' — <span style=\'color:var(--ttd)\'>'+notaFinal+'</span>':'') + '</div>'
+      + chipsHTML
+      + '</div>'
+      + '<button onclick="cerrarNotaExpandida()" style="width:100%;margin-top:14px;padding:11px;background:var(--text);color:#fff;border:none;border-radius:var(--radius-sm);font-family:Bebas Neue,sans-serif;font-size:16px;cursor:pointer">Cerrar</button>';
   }
 
-  // Multi-docente section
-  var docenteNotas = notas[trabajoId + '_docentes'] || {};
-  var docenteHTML = '<div style="margin-bottom:12px"><div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Notas por docente</div>';
-  Object.keys(docenteNotas).forEach(function(dNombre) {
-    docenteHTML += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">'
-      + '<span style="font-size:12px;color:var(--text3)">' + dNombre + '</span>'
-      + '<span style="font-family:DM Mono,monospace;font-size:13px;font-weight:700">' + docenteNotas[dNombre] + '</span>'
-      + '</div>';
-  });
-  docenteHTML += '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">'
-    + '<input type="text" inputmode="decimal" id="miNotaDocente" placeholder="Mi nota" style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:13px;font-family:DM Mono,monospace">'
-    + '<button onclick="guardarNotaDocente(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ')" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:4px;font-size:11px;font-family:DM Mono,monospace;cursor:pointer">Guardar</button>'
-    + '</div></div>';
-
-  var html = '<div class="modal-title">' + t.nombre + ' — ' + displayName(a) + '</div>'
-    + criteriosHTML
-    + docenteHTML
-    + '<div style="border-top:2px solid var(--border);padding-top:12px;margin-top:4px">'
-    + '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Nota final</div>'
-    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px" id="notaFinalChips">'
-    + buildNotaChips(notaFinal, alumnoId, trabajoId)
-    + '</div></div>'
-    + '<button onclick="cerrarNotaExpandida()" style="width:100%;padding:10px;background:var(--text);color:#fff;border:none;border-radius:var(--radius-sm);font-family:Bebas Neue,sans-serif;font-size:16px;cursor:pointer">Cerrar</button>';
-
-  openModalRaw('modalGestionTrabajos', html);
+  openModalRaw('modalGestionTrabajos', buildHTML());
+  window._notaExpandida.buildHTML = buildHTML;
 }
 
-function cerrarNotaExpandida(){closeModalById("modalGestionTrabajos");}
 
 function setCriterioNota(alumnoId, trabajoId, criterioId, valor) {
   if (!currentComision.notas) currentComision.notas = {};
@@ -2623,11 +2654,28 @@ function buildNotaChips(current, alumnoId, trabajoId) {
 function setNotaFinalDirecta(alumnoId, trabajoId, valor) {
   if (!currentComision.notas) currentComision.notas = {};
   if (!currentComision.notas[alumnoId]) currentComision.notas[alumnoId] = {};
-  currentComision.notas[alumnoId][trabajoId] = {valor: valor, sistema: state.notaSistema};
+  if (valor === null) {
+    delete currentComision.notas[alumnoId][trabajoId];
+  } else {
+    currentComision.notas[alumnoId][trabajoId] = {valor: valor, sistema: state.notaSistema};
+  }
   save();
-  toast('Nota guardada');
-  var chipsEl = document.getElementById('notaFinalChips');
-  if (chipsEl) chipsEl.innerHTML = buildNotaChips(valor, alumnoId, trabajoId);
+  toast(valor ? 'Nota guardada: ' + valor : 'Nota borrada');
+  // Re-render modal
+  if (window._notaExpandida && window._notaExpandida.buildHTML) {
+    var overlay = document.getElementById('modalGestionTrabajos');
+    if (overlay && overlay.classList.contains('open')) {
+      var box = overlay.querySelector('.modal');
+      if (box) {
+        var handle = box.querySelector('.modal-handle');
+        box.innerHTML = '';
+        if (handle) box.appendChild(handle);
+        box.insertAdjacentHTML('beforeend', window._notaExpandida.buildHTML());
+      }
+    }
+  }
+  // Also refresh main notas view
+  if (typeof renderNotas === 'function') renderNotas();
 }
 
 
@@ -3652,8 +3700,12 @@ function saveTotalClases(){
 }
 function renderPapelera(){
   const list=document.getElementById('papeleraList');
-  if(!state.papelera.length){list.innerHTML='<div style="font-size:13px;color:var(--text3)">La papelera está vacía.</div>';return;}
-  list.innerHTML=state.papelera.map((a,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><div><div style="font-size:13px;font-weight:600">${displayName(a)}</div><div style="font-size:11px;color:var(--text3)">${a._year} · ${a._comision} · ${new Date(a._fecha).toLocaleDateString('es-AR')}</div></div><button style="background:none;border:none;color:var(--ausente);cursor:pointer;font-size:13px" onclick="limpiarPapelera(${i})">Borrar</button></div>`).join('');
+  if(!state.papelera||!state.papelera.length){list.innerHTML='<div style="font-size:13px;color:var(--text3)">La papelera está vacía.</div>';return;}
+  list.innerHTML=state.papelera.map((a,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+    <div><div style="font-size:13px;font-weight:600">${displayName(a)}</div>
+    <div style="font-size:11px;color:var(--text3)">${a._year||''} · ${a._comision||''} · ${a._fecha?new Date(a._fecha).toLocaleDateString('es-AR'):''}</div></div>
+    <button onclick="restaurarAlumno('${a.id}')" style="padding:5px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;font-family:'DM Mono',monospace;cursor:pointer;color:var(--text2)">Restaurar</button>
+  </div>`).join('');
 }
 function limpiarPapelera(i){
   if(!confirm('¿Eliminar definitivamente este alumno de la papelera?'))return;
@@ -3991,7 +4043,8 @@ function handleMadreChipClick(alumnoId, comId) {
   }
   if (currentCom) {
     // Already in another comision — confirm change
-    var alumno = (getMadre(currentYear).alumnos||[]).find(function(a){ return a.id === alumnoId; });
+    var alumno = (currentComision.alumnos||[]).find(function(a){ return a.id === alumnoId; });
+    if (!alumno && currentYear) alumno = (getMadre(currentYear).alumnos||[]).find(function(a){ return a.id === alumnoId; });
     var nombre = alumno ? displayName(alumno) : 'este alumno';
     _pendingComChange = {alumnoId: alumnoId, fromComId: currentCom.id, toComId: comId};
     document.getElementById('comChangeNombre').textContent = nombre;
