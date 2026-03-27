@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>TTD — Taller Transversal de Diseño</title>
@@ -28,6 +28,49 @@ function loginSetMode(mode) {
   if (panelAlumno)  panelAlumno.style.display  = mode === 'alumno'  ? 'flex' : 'none';
   if (panelDocente) panelDocente.style.display = mode === 'docente' ? 'block' : 'none';
   if (mode === 'docente') setTimeout(function(){ var e=document.getElementById('loginEmail'); if(e) e.focus(); }, 100);
+  var pr = document.getElementById('loginPanelRegistro');
+  if (pr) pr.style.display = (mode === 'registro') ? 'block' : 'none';
+  // hide tabs when in registro mode
+  var toggle = document.querySelector('.pin-mode-toggle');
+  if (toggle) toggle.style.display = (mode === 'registro') ? 'none' : 'flex';
+  if (mode === 'registro') {
+    if(panelAlumno) panelAlumno.style.display = 'none';
+    if(panelDocente) panelDocente.style.display = 'none';
+  }
+}
+
+async function docenteRegistro() {
+  var nombre = (document.getElementById('regNombre')?.value||'').trim();
+  var apellido = (document.getElementById('regApellido')?.value||'').trim();
+  var email = (document.getElementById('regEmail')?.value||'').trim();
+  var pass = document.getElementById('regPass')?.value||'';
+  var codigo = (document.getElementById('regCodigo')?.value||'').trim();
+  var errEl = document.getElementById('loginError');
+  var btn = document.getElementById('regBtn');
+  errEl.style.display = 'none';
+  if (!nombre||!apellido||!email||!pass||!codigo) {
+    errEl.textContent = 'Completá todos los campos';
+    errEl.style.display = 'block'; return;
+  }
+  if (!window.fbRegister) {
+    errEl.textContent = 'Sin conexión a Firebase';
+    errEl.style.display = 'block'; return;
+  }
+  btn.textContent = 'Registrando...'; btn.disabled = true;
+  var yearVal = (document.getElementById('regYear')?.value||'').trim();
+  if (!yearVal) { errEl.textContent = 'Seleccioná tu rol o año'; errEl.style.display='block'; return; }
+  var years = yearVal === 'titular' ? [1,2,3,4,5] : [parseInt(yearVal)];
+  var rol = yearVal === 'titular' ? 'titular' : 'pendiente';
+  var err = await window.fbRegister(email, pass, nombre, apellido, codigo, years, rol);
+  btn.textContent = 'Registrarme'; btn.disabled = false;
+  if (err) {
+    errEl.textContent = err; errEl.style.display = 'block';
+  } else {
+    errEl.style.color = 'var(--presente)';
+    errEl.textContent = 'Registro exitoso. El administrador debe aprobar tu acceso.';
+    errEl.style.display = 'block';
+    setTimeout(function(){ loginSetMode('docente'); errEl.style.color=''; }, 3000);
+  }
 }
 
 async function docenteLogin() {
@@ -149,7 +192,13 @@ function showLoginScreen() {
   loginSetMode('alumno');
   var _ls = document.getElementById('loginScreen');
   if (_ls) { _ls.style.display = 'flex'; _ls.style.zIndex = '600'; }
-  document.getElementById('mainHeader').style.display = 'none';
+  var _mh = document.getElementById('mainHeader');
+  if (_mh) _mh.style.display = 'none';
+  // Safety: ensure login visible after any pending renders
+  setTimeout(function() {
+    var ls2 = document.getElementById('loginScreen');
+    if (ls2 && !window._appUnlocked) ls2.style.display = 'flex';
+  }, 200);
   document.getElementById('studentScreen').classList.remove('open');
   var loadSc = document.getElementById('loadingScreen');
   if (loadSc) loadSc.style.display = 'none';
@@ -178,6 +227,8 @@ function showLoginScreen() {
 }
 
 function unlockApp() {
+  window._loggedOut = false;      // user successfully logged in — re-enable Firebase events
+  window._intentionalLogout = false;
   window._appUnlocked = true;
   const ls = document.getElementById('loginScreen');
   if (ls) ls.style.display = 'none';
@@ -185,6 +236,8 @@ function unlockApp() {
   if (loading) loading.style.display = 'none';
   document.getElementById('mainHeader').style.display = 'flex';
   loadSampleData();
+  // Ensure madre comision exists on all years
+  (state.years||[]).forEach(function(y){ getMadre(y); syncMadre(y); });
   renderYears();
   showViewDirect('view-years');
 }
@@ -1020,7 +1073,7 @@ select.input-field { cursor: pointer; }
     auth.onAuthStateChanged(function(user) {
       if (user) {
         window._fbUser = user;
-        if (!window._appUnlocked && !window._intentionalLogout) {
+        if (!window._appUnlocked && !window._loggedOut) {
           // Load Firestore state before unlocking
           db.collection('ttd').doc('state').get().then(function(snap) {
             if (snap.exists) {
@@ -1044,9 +1097,16 @@ select.input-field { cursor: pointer; }
               localStorage.setItem('ttd_v1', JSON.stringify(state));
               window.fbSave(JSON.parse(JSON.stringify(state)));
             }
-            unlockApp();
+            // Load user profile for role-based access
+            window.fbLoadUserProfile(user.uid).then(function(profile) {
+              window._userProfile = profile;
+              unlockApp();
+            }).catch(function() {
+              window._userProfile = null;
+              unlockApp();
+            });
           }).catch(function() {
-            // Firestore failed — use localStorage and unlock anyway
+            window._userProfile = null;
             unlockApp();
           });
         }
@@ -1056,8 +1116,7 @@ select.input-field { cursor: pointer; }
         if (typeof showLoginScreen === 'function') showLoginScreen();
       }
     });
-    // Sign out any cached session — login screen is always shown on load
-    auth.signOut().catch(function(){});
+    // Login screen is shown by default (HTML), Firebase will unlock if session exists
 
     window.fbDoLogin = async function(email, pass) {
       try {
@@ -1085,6 +1144,19 @@ select.input-field { cursor: pointer; }
             window.fbSave(JSON.parse(JSON.stringify(state)));
           }
         } catch(e) {}
+        // Load user profile
+        try {
+          const profileSnap = await db.collection('ttd_users').doc(window._fbUser.uid).get();
+          window._userProfile = profileSnap.exists ? profileSnap.data() : null;
+          // Auto-create profile for admin (first user / existing users)
+          if (!window._userProfile) {
+            await db.collection('ttd_users').doc(window._fbUser.uid).set({
+              nombre: '', apellido: '', email: window._fbUser.email,
+              rol: 'admin', years: [1,2,3,4,5], createdAt: new Date().toISOString()
+            });
+            window._userProfile = {rol:'admin', years:[1,2,3,4,5]};
+          }
+        } catch(e) { window._userProfile = null; }
         return null; // no error
       } catch(e) {
         window._fbUser = null;
@@ -1095,6 +1167,58 @@ select.input-field { cursor: pointer; }
         if (e.code === 'auth/network-request-failed') return 'Sin conexión a internet';
         return 'Error al ingresar (' + e.code + ')';
       }
+    };
+
+    // Register new docente with secret code
+    window.fbRegister = async function(email, pass, nombre, apellido, codigo, years, rol) {
+      const expectedCodigo = (state && state.codigoRegistro) || 'TTD2026';
+      if (codigo !== expectedCodigo) return 'Código de registro incorrecto';
+      try {
+        const cred = await auth.createUserWithEmailAndPassword(email, pass);
+        const uid = cred.user.uid;
+        // Save profile to Firestore - pending approval by admin
+        var finalRol = rol || 'pendiente';
+        var finalYears = years || [];
+        await db.collection('ttd_users').doc(uid).set({
+          nombre: nombre, apellido: apellido, email: email,
+          rol: finalRol,
+          years: finalYears,
+          yearSolicitado: years && years.length === 5 ? 'titular' : (years && years[0] ? years[0] : null),
+          createdAt: new Date().toISOString()
+        });
+        return null; // success
+      } catch(e) {
+        if (e.code === 'auth/email-already-in-use') return 'Ese email ya está registrado';
+        if (e.code === 'auth/weak-password') return 'La contraseña debe tener al menos 6 caracteres';
+        return e.message;
+      }
+    };
+
+    // Load user profile from Firestore
+    window.fbLoadUserProfile = async function(uid) {
+      try {
+        const snap = await db.collection('ttd_users').doc(uid).get();
+        if (snap.exists) return snap.data();
+        return null;
+      } catch(e) { return null; }
+    };
+
+    // Save user profile (admin only)
+    window.fbSaveUserProfile = async function(uid, profile) {
+      try {
+        await db.collection('ttd_users').doc(uid).set(profile, {merge: true});
+        return null;
+      } catch(e) { return e.message; }
+    };
+
+    // Load all user profiles (admin only)
+    window.fbLoadAllProfiles = async function() {
+      try {
+        const snap = await db.collection('ttd_users').get();
+        const profiles = {};
+        snap.forEach(function(doc) { profiles[doc.id] = doc.data(); });
+        return profiles;
+      } catch(e) { return {}; }
     };
 
     window.fbSave = function(data) {
@@ -1110,6 +1234,10 @@ select.input-field { cursor: pointer; }
   } catch(e) {
     console.warn('Firebase error:', e);
     goOffline();
+  }
+  // Ensure fbRegister always exists (shows error if Firebase failed)
+  if (!window.fbRegister) {
+    window.fbRegister = async function() { return 'Firebase no disponible. Intentá más tarde.'; };
   }
 })();</script>
 
@@ -1183,6 +1311,34 @@ select.input-field { cursor: pointer; }
       <div style="font-family:'DM Mono','Courier New',monospace;font-size:10px;color:var(--text3);text-align:center;margin-top:4px">
         Sin conexión: PIN local 1234
       </div>
+      <button onclick="loginSetMode('registro')" style="background:none;border:none;font-family:'DM Mono','Courier New',monospace;font-size:11px;color:var(--ttd);cursor:pointer;text-align:center;margin-top:8px;text-decoration:underline">
+        Registrarme como docente
+      </button>
+    </div>
+  </div>
+
+  <!-- Panel registro: nuevo docente -->
+  <div id="loginPanelRegistro" style="display:none;width:100%;max-width:300px;margin:0 auto">
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="regNombre" placeholder="Nombre" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box"/>
+      <input id="regApellido" placeholder="Apellido" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box"/>
+      <input id="regEmail" type="email" placeholder="Email institucional" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box"/>
+      <div style="position:relative">
+        <input id="regPass" type="password" placeholder="Contraseña (mín. 6 caracteres)" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 44px 12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box"/>
+        <button type="button" onclick="var i=document.getElementById('regPass');i.type=i.type==='password'?'text':'password'" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text3);padding:4px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+      </div>
+      <select id="regYear" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box">
+        <option value="">Seleccioná tu rol / año</option>
+        <option value="titular">Titular / Adjunto (acceso completo)</option>
+        <option value="1">1° Año</option>
+        <option value="2">2° Año</option>
+        <option value="3">3° Año</option>
+        <option value="4">4° Año</option>
+        <option value="5">5° Año</option>
+      </select>
+      <input id="regCodigo" placeholder="Código de registro" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;color:var(--text);font-family:'Manrope',-apple-system,sans-serif;box-sizing:border-box"/>
+      <button id="regBtn" onclick="docenteRegistro()" style="width:100%;padding:13px;background:var(--ttd);color:#fff;border:none;border-radius:var(--radius-sm);font-family:'Bebas Neue','Arial Black',sans-serif;font-size:18px;letter-spacing:1.5px;cursor:pointer">Registrarme</button>
+      <button onclick="loginSetMode('docente')" style="background:none;border:none;font-family:'DM Mono','Courier New',monospace;font-size:11px;color:var(--text3);cursor:pointer;text-align:center">Volver al login</button>
     </div>
   </div>
 
@@ -1221,34 +1377,54 @@ select.input-field { cursor: pointer; }
   </button>
 </div>
 </div><!-- ═══════════ VIEW: COMISIONES ═══════════ -->
-<div class="view" id="view-comisiones"><div id="proximaClaseBanner"></div><div class="section-title" id="comisTitle"></div><div id="comisionList"></div><button class="btn-ghost-add" onclick="showAddComision()">+ Nueva comisión</button>
+<div class="view" id="view-comisiones"><div id="proximaClaseBanner"></div><div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="section-title" id="comisTitle" style="margin-bottom:0"></div><button onclick="showYearCompleto()" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);background:none;border:1px solid rgba(255,92,0,.3);border-radius:20px;padding:4px 12px;cursor:pointer">Ver año completo</button></div><div id="comisionList"></div><button class="btn-ghost-add" onclick="showAddComision()">+ Nueva comisión</button>
+
   <button onclick="fbLogoutAndReset()" title="Cerrar sesión" style="background:none;border:none;cursor:pointer;color:var(--text3);padding:4px;display:flex;align-items:center">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
   </button>
 </div><!-- ═══════════ VIEW: COMISION DETAIL ═══════════ -->
 <div class="view" id="view-comision"><div class="pill" id="comisionPill"></div><div class="tabs" id="mainTabs"><div class="tab active" onclick="switchTab('asistencia')">Asist.</div><div class="tab" onclick="switchTab('notas')">Notas</div><div class="tab" onclick="switchTab('grupos')">Grupos</div><div class="tab" onclick="switchTab('drive')">Drive</div><div class="tab" onclick="switchTab('calendario')">Cal.</div><div class="tab" onclick="switchTab('historial')">Hist.</div><div class="tab" onclick="switchTab('resumen')">Resumen</div></div><!-- ASISTENCIA --><div id="tab-asistencia"><div id="contadorReg" style="margin-bottom:12px"></div><div class="date-bar">
   <span class="date-label">Clase del</span>
-  <div style="position:relative;display:inline-block" onclick="var di=document.getElementById('dateInput');di.showPicker?di.showPicker():di.click()">
-    <input type="date" class="date-input" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:3" onchange="updateDateDisplay();renderAlumnos();">
-    <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);cursor:pointer;min-width:120px;text-align:center;pointer-events:none">—</div>
-  </div>
+  <label for="dateInput" style="position:relative;display:inline-block;cursor:pointer">
+    <input type="date" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:3;border:none" onchange="updateDateDisplay();renderAlumnos();">
+    <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);cursor:pointer;min-width:120px;text-align:center">—</div>
+  </label>
 </div><div id="alertasComision" style="margin-bottom:10px"></div><div id="alumnoList"></div><div class="action-row"><button class="btn-secondary" onclick="showModalAlumno()">+ Alumno</button><button class="btn-secondary" onclick="exportCSV()">↓ CSV</button><button class="btn-secondary" onclick="exportPDF()">↓ PDF</button></div></div><!-- NOTAS --><div id="tab-notas" style="display:none"><div id="notasList"></div><button class="btn-primary" onclick="saveNotas()">Guardar notas</button></div><!-- GRUPOS --><div id="tab-grupos" style="display:none"><div id="gruposList"></div><button class="btn-ghost-add mt8" onclick="showAddGrupo()">+ Nuevo grupo</button></div><!-- DRIVE --><div id="tab-drive" style="display:none"><div class="info-box"> Conectá una carpeta pública de Google Drive para detectar entregas automáticamente.</div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-weight:600;font-size:14px"> Google Drive</span><span id="driveStatusBadge" style="font-size:11px;color:var(--text3)">No conectado</span></div><div id="driveNotConnected"><input class="input-field" type="text" id="driveFolderUrl" placeholder="https://drive.google.com/drive/folders/..." style="margin-bottom:8px"/><button class="btn-primary" style="margin-top:0" onclick="driveConnect()">Conectar carpeta</button></div><div id="driveConnected" style="display:none"><div style="font-size:12px;color:var(--text3);margin-bottom:10px" id="driveLastSync"></div><button class="btn-secondary" onclick="driveSyncNow()" style="width:100%;justify-content:center">Sincronizar</button><div id="driveFileList" style="margin-top:12px"></div></div></div><div class="section-title mt16">Entregas por alumno</div><div id="entregaAlumnoList"></div><button class="btn-primary" onclick="saveNotas()">Guardar</button></div><!-- CALENDARIO --><div id="tab-calendario" style="display:none"><div id="calendarWidget"></div><div class="action-row"><button class="btn-secondary" onclick="showAddEvento('clase')" style="flex:1;justify-content:center">+ Clase</button><button class="btn-secondary" onclick="showAddEvento('invitado')" style="flex:1;justify-content:center">+ Invitado</button><button class="btn-secondary" onclick="showAddEvento('entrega')" style="flex:1;justify-content:center">+ Entrega</button><button class="btn-secondary" onclick="showAddEvento('feriado')" style="flex:1;justify-content:center">+ Feriado</button></div><div class="cal-event-list" id="calEventList"></div><div id="calImportArea"></div></div><!-- HISTORIAL --><div id="tab-historial" style="display:none"><div id="historialList"></div></div><!-- RESUMEN --><div id="tab-resumen" style="display:none"><div class="resumen-grid" id="resumenGrid"></div><div class="chart-wrap"><div class="chart-title">Evolución de asistencia</div><canvas id="chartCanvas" class="chart-canvas"></canvas></div><div class="section-title">Ranking de participación</div><div id="rankingList" style="margin-bottom:16px"></div><div class="section-title">Por alumno</div><div id="resumenAlumnos"></div></div>
 </div><!-- ═══════════ VIEW: PROGRAMA ═══════════ -->
 <div class="view" id="view-programa"><div class="section-title" id="programaTitleEl">Programa de la materia</div><div id="programaList"></div><button class="btn-ghost-add" onclick="showAddPrograma()">+ Agregar unidad</button>
 </div><!-- ═══════════ VIEW: CONFIG ═══════════ -->
 <div class="view" id="view-config"><div class="section-title">Configuración</div>
+  <div id="adminPanel" style="margin-bottom:16px"></div>
   <div id="fbUserInfo" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center"><span id="fbUserEmail"></span><button onclick="fbLogoutAndReset()" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:11px;color:var(--ausente);cursor:pointer;padding:0">Cerrar sesión</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> PIN de acceso</div><input class="input-field" id="newPin1" type="password" inputmode="numeric" maxlength="4" placeholder="Nuevo PIN (4 dígitos)" /><input class="input-field" id="newPin2" type="password" inputmode="numeric" maxlength="4" placeholder="Confirmar PIN" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="changePin()">Cambiar PIN</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> Sistema de notas</div><div style="font-size:13px;color:var(--text2);margin-bottom:10px">Sistema global para todas las comisiones</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:10px;cursor:pointer"><input type="radio" name="notaSys" value="numerico" id="sysNum" style="accent-color:var(--ttd)"><span style="font-size:14px">Numérico (1–10)</span></label><label style="display:flex;align-items:center;gap:10px;margin-bottom:10px;cursor:pointer"><input type="radio" name="notaSys" value="conceptual" id="sysCon" style="accent-color:var(--ttd)"><span style="font-size:14px">Conceptual</span></label><label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="radio" name="notaSys" value="ambos" id="sysBoth" style="accent-color:var(--ttd)"><span style="font-size:14px">Ambos (elegir por campo)</span></label><button class="btn-primary" style="margin-top:12px" onclick="saveConfig()">Guardar configuración</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> Regularidad</div><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px">Total de clases del cuatrimestre</label><input class="input-field" id="totalClases" type="number" min="1" max="60" placeholder="Ej: 32" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="saveTotalClases()">Guardar</button></div><div style="background:rgba(255,77,106,.07);border:1px solid rgba(255,77,106,.2);border-radius:var(--radius);padding:16px"><div style="font-weight:600;margin-bottom:8px;font-family:'Bebas Neue',sans-serif;color:var(--ausente)"> Papelera de alumnos</div><div style="font-size:13px;color:var(--text2);margin-bottom:10px">Alumnos eliminados guardados como respaldo</div><div id="papeleraList"></div></div>
-</div><!-- ═══════ MODALS ═══════ -->
+</div>
+<!-- ═══════════ VIEW: AÑO COMPLETO ═══════════ -->
+<div class="view" id="view-year-completo">
+  <div style="padding:16px 18px">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:2px;margin-bottom:4px" id="yearCompletoTitle">Año completo</div>
+    <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:16px" id="yearCompletoSub"></div>
+    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap" id="yearCompletoTabs">
+      <button onclick="yearCompletoTab('notas')" id="ycTabNotas" style="font-family:'DM Mono',monospace;font-size:11px;padding:6px 14px;border-radius:20px;border:1px solid var(--border);cursor:pointer;background:var(--text);color:#fff">Notas</button>
+      <button onclick="yearCompletoTab('asistencia')" id="ycTabAsist" style="font-family:'DM Mono',monospace;font-size:11px;padding:6px 14px;border-radius:20px;border:1px solid var(--border);cursor:pointer;background:var(--surface);color:var(--text2)">Asistencia</button>
+      <button onclick="yearCompletoTab('drive')" id="ycTabDrive" style="font-family:'DM Mono',monospace;font-size:11px;padding:6px 14px;border-radius:20px;border:1px solid var(--border);cursor:pointer;background:var(--surface);color:var(--text2)">Drive</button>
+    </div>
+    <div id="yearCompletoBody"></div>
+  </div>
+</div>
+<!-- ═══════ MODALS ═══════ -->
 <!-- Modal: Nueva comisión -->
 <div class="modal-backdrop" id="modalComision" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Nueva comisión</div><input class="input-field" id="newComisionInput" placeholder="Ej: Comisión A, Turno Mañana..."/><div class="btn-row mt8"><button class="btn-sm primary" onclick="confirmAddComision()">Crear</button><button class="btn-sm ghost" onclick="closeModalById('modalComision')">Cancelar</button></div></div>
 </div><!-- Modal: Agregar alumno -->
 <div class="modal-backdrop" id="modalAlumno" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Agregar Alumnos</div><div class="import-panel"><div class="import-tabs"><div class="import-tab active" onclick="switchImportTab('manual')">Manual</div><div class="import-tab" onclick="switchImportTab('paste')">Pegar</div><div class="import-tab" onclick="switchImportTab('excel')">Excel</div></div><div class="import-body"><div class="import-section active" id="import-manual"><input class="input-field" id="alumnoApellido" placeholder="Apellido *"/><input class="input-field" id="alumnoNombre" placeholder="Nombre *"/><input class="input-field" id="alumnoLegajo" placeholder="N° Legajo / DNI (opcional)"/><input class="input-field" id="alumnoEmail" placeholder="Email (opcional)" style="margin-bottom:0"/></div><div class="import-section" id="import-paste"><div class="info-box">Copiá celdas de Excel y pegálas aquí. La app detecta columnas automáticamente.</div><textarea class="input-field" id="pasteInput" placeholder="Pegá datos de Excel aquí..." oninput="parsePaste()"></textarea><div id="pastePreview"></div></div><div class="import-section" id="import-excel"><div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()" ondragover="dragOver(event)" ondragleave="dragLeave()" ondrop="dropFile(event)"><input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="handleFileInput(event)"><div style="font-size:24px;margin-bottom:8px;color:var(--text3);font-family:'DM Mono',monospace">XLS</div><div id="dropZoneText" style="font-size:13px">Tocá para subir Excel o CSV</div></div><div id="excelColMapping" style="display:none"><div class="section-title" style="margin-top:12px">Asignar columnas</div><div class="col-row"><span style="width:75px;flex-shrink:0">Apellido:</span><select class="input-field" id="mapApellido" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Nombre:</span><select class="input-field" id="mapNombre" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Legajo:</span><select class="input-field" id="mapLegajo" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Email:</span><select class="input-field" id="mapEmail" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div id="excelPreview" style="margin-top:10px"></div></div></div></div></div><div class="btn-row"><button class="btn-sm primary" onclick="confirmAddAlumnos()">Agregar</button><button class="btn-sm ghost" onclick="closeModalById('modalAlumno')">Cancelar</button></div></div>
+</div><!-- Modal: Cambio de comisión -->
+<div class="modal-backdrop" id="modalCambioComision" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Cambiar comisión</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px"><strong id="comChangeNombre"></strong> está en <strong id="comChangeFrom"></strong>.</div><div style="font-size:13px;color:var(--text2);margin-bottom:16px">¿Mover a <strong id="comChangeTo"></strong>?</div><div class="btn-row mt8"><button class="btn-sm primary" onclick="confirmCambioComision()">Mover</button><button class="btn-sm ghost" onclick="closeModalById('modalCambioComision')">Cancelar</button></div></div>
+</div><!-- Modal: Archivar alumno -->
+<div class="modal-backdrop" id="modalArchivar" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Archivar alumno</div><div style="font-size:13px;color:var(--text2);margin-bottom:4px">¿Archivás a <strong id="archiveModalNombre"></strong>?</div><div style="font-size:12px;color:var(--text3);margin-bottom:16px">Podés restaurarlo desde Configuración → Papelera.</div><div class="btn-row mt8"><button class="btn-sm" style="background:var(--ausente);color:#fff;border:none" onclick="confirmArchive()">Archivar</button><button class="btn-sm ghost" onclick="closeModalById('modalArchivar')">Cancelar</button></div></div>
 </div><!-- Modal: Observación -->
 <div class="modal-backdrop" id="modalObs" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title" id="obsModalTitle">Observación</div><textarea class="input-field" id="obsInput" placeholder="Escribí una observación sobre este alumno..."></textarea><div class="btn-row mt8"><button class="btn-sm primary" onclick="saveObs()">Guardar</button><button class="btn-sm ghost" onclick="closeModalById('modalObs')">Cancelar</button></div></div>
 </div><!-- Modal: Estado alumno -->
 <div class="modal-backdrop" id="modalEstado" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title" id="estadoModalTitle">Estado de cursada</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="estadoOptions"><button class="btn-sm" style="background:rgba(91,140,255,.15);color:var(--blue);border:1px solid rgba(91,140,255,.3)" onclick="setEstado('cursando')">Cursando</button><button class="btn-sm" style="background:rgba(0,229,200,.15);color:var(--teal);border:1px solid rgba(0,229,200,.3)" onclick="setEstado('regular')">Regular</button><button class="btn-sm" style="background:rgba(255,77,106,.15);color:var(--ausente);border:1px solid rgba(255,77,106,.3)" onclick="setEstado('libre')">! Libre</button><button class="btn-sm" style="background:rgba(100,100,120,.15);color:var(--text3);border:1px solid var(--border)" onclick="setEstado('abandono')">Abandono</button><button class="btn-sm" style="background:rgba(255,140,66,.15);color:var(--orange);border:1px solid rgba(255,140,66,.3)" onclick="setEstado('desaprobado')">Desaprobado</button><button class="btn-sm ghost" onclick="closeModalById('modalEstado')">Cancelar</button></div></div>
 </div><!-- Modal: Evento calendario -->
-<div class="modal-backdrop" id="modalEvento" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title" id="eventoModalTitle">Nuevo evento</div><input class="input-field" type="date" id="eventoFecha"/><input class="input-field" id="eventoTitulo" placeholder="Título del evento"/><textarea class="input-field" id="eventoDesc" placeholder="Descripción (opcional)" style="min-height:60px;margin-bottom:0"></textarea><div class="btn-row mt8"><button class="btn-sm primary" onclick="confirmAddEvento()">Agregar</button><button class="btn-sm ghost" onclick="closeModalById('modalEvento')">Cancelar</button></div></div>
+<div class="modal-backdrop" id="modalEvento" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title" id="eventoModalTitle">Nuevo evento</div><input class="input-field" type="date" id="eventoFecha"/><input class="input-field" id="eventoTitulo" placeholder="Título del evento"/><select class="input-field" id="eventoAlcance" style="margin-bottom:0"><option value="comision">Esta comisión</option><option value="year">Todo el año</option><option value="catedra">Toda la cátedra</option></select><textarea class="input-field" id="eventoDesc" placeholder="Descripción (opcional)" style="min-height:60px;margin-bottom:0"></textarea><div class="btn-row mt8"><button class="btn-sm primary" onclick="confirmAddEvento()">Agregar</button><button class="btn-sm ghost" onclick="closeModalById('modalEvento')">Cancelar</button></div></div>
 </div><!-- Modal: Programa -->
 <div class="modal-backdrop" id="modalPrograma" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Nueva unidad</div><input class="input-field" id="progTitulo" placeholder="Título de la unidad"/><textarea class="input-field" id="progDesc" placeholder="Descripción / contenidos" style="min-height:60px;margin-bottom:0"></textarea><div class="btn-row mt8"><button class="btn-sm primary" onclick="confirmAddPrograma()">Agregar</button><button class="btn-sm ghost" onclick="closeModalById('modalPrograma')">Cancelar</button></div></div>
 </div><!-- Modal: Grupo -->
@@ -1286,32 +1462,47 @@ select.input-field { cursor: pointer; }
 // STATE
 // ══════════════════════════════════════════════════════════
 const DEFAULT_TRABAJOS = [
-  {id:'tw1', nombre:'Participación', tipo:'individual', drive:'', grupos:[]},
-  {id:'tw2', nombre:'TP 1', tipo:'grupal', drive:'', grupos:[]},
-  {id:'tw3', nombre:'TP 2', tipo:'grupal', drive:'', grupos:[]},
-  {id:'tw4', nombre:'Preentrega', tipo:'individual', drive:'', grupos:[]},
-  {id:'tw5', nombre:'Entrega Final', tipo:'grupal', drive:'', grupos:[]},
+  {id:'tw1', nombre:'Participación', tipo:'individual', drive:'', grupos:[], criterios:[]},
+  {id:'tw2', nombre:'TP 1', tipo:'grupal', drive:'', grupos:[], criterios:[]},
+  {id:'tw3', nombre:'TP 2', tipo:'grupal', drive:'', grupos:[], criterios:[]},
+  {id:'tw4', nombre:'Preentrega', tipo:'individual', drive:'', grupos:[], criterios:[]},
+  {id:'tw5', nombre:'Entrega Final', tipo:'grupal', drive:'', grupos:[], criterios:[]},
 ];
 
 const DEFAULT_STATE = {
-  version: 4,
+  version: 5,
   pin: '1234',
   notaSistema: 'numerico',
   totalClases: 32,
   papelera: [],
   transversal: { grupos: [], asistencias: {} },
+  catedraEventos: [],
+  codigoRegistro: 'TTD2026',
+  userProfiles: {},
   years: [
-    { id:1, label:'1° Año', comisiones:[], programa:[], trabajos: JSON.parse(JSON.stringify(DEFAULT_TRABAJOS)) },
-    { id:2, label:'2° Año', comisiones:[], programa:[], trabajos: JSON.parse(JSON.stringify(DEFAULT_TRABAJOS)) },
-    { id:3, label:'3° Año', comisiones:[], programa:[], trabajos: JSON.parse(JSON.stringify(DEFAULT_TRABAJOS)) },
-    { id:4, label:'4° Año', comisiones:[], programa:[], trabajos: JSON.parse(JSON.stringify(DEFAULT_TRABAJOS)) },
-    { id:5, label:'5° Año', comisiones:[], programa:[], trabajos: JSON.parse(JSON.stringify(DEFAULT_TRABAJOS)) },
+    { id:1, label:'1° Año', comisiones:[], programa:[], trabajos: JSON.parse(JSON.stringify(DEFAULT_TRABAJOS)), pool:[], eventos:[] },
+    { id:2, label:'2° Año', comisiones:[], programa:[], trabajos: JSON.parse(JSON.stringify(DEFAULT_TRABAJOS)), pool:[], eventos:[] },
+    { id:3, label:'3° Año', comisiones:[], programa:[], trabajos: JSON.parse(JSON.stringify(DEFAULT_TRABAJOS)), pool:[], eventos:[] },
+    { id:4, label:'4° Año', comisiones:[], programa:[], trabajos: JSON.parse(JSON.stringify(DEFAULT_TRABAJOS)), pool:[], eventos:[] },
+    { id:5, label:'5° Año', comisiones:[], programa:[], trabajos: JSON.parse(JSON.stringify(DEFAULT_TRABAJOS)), pool:[], eventos:[] },
   ]
 };
 
 let _saved = JSON.parse(localStorage.getItem('ttd_v1')||'null');
 // Migrate or reset if old version
 if (_saved && _saved.version < 3) { _saved = null; localStorage.removeItem('ttd_v1'); }
+// Migrate v4 → v5: add catedraEventos, pool, userProfiles, eventos per year
+if (_saved && _saved.version === 4) {
+  _saved.version = 5;
+  if (!_saved.catedraEventos) _saved.catedraEventos = [];
+  if (!_saved.userProfiles) _saved.userProfiles = {};
+  if (!_saved.codigoRegistro) _saved.codigoRegistro = 'TTD2026';
+  (_saved.years||[]).forEach(function(y) {
+    if (!y.pool) y.pool = [];
+    if (!y.eventos) y.eventos = [];
+    (y.trabajos||[]).forEach(function(t){ if (!t.criterios) t.criterios = []; });
+  });
+}
 // Migrate v3 → v4: add trabajos to years, update notaSistema
 if (_saved && _saved.version === 3) {
   _saved.version = 4;
@@ -1378,6 +1569,13 @@ let parsedAlumnos = [], excelHeaders = [], excelRows = [], currentImportTab = 'm
 let obsAlumnoId = null, estadoAlumnoId = null, currentEventoType = null;
 
 function save() {
+  // Ensure all alumnos have PINs before saving
+  (state.years||[]).forEach(function(y) {
+    (y.comisiones||[]).forEach(function(c) {
+      (c.alumnos||[]).forEach(function(a) { if (!a.pin) a.pin = genPin(); });
+    });
+    (y.pool||[]).forEach(function(a) { if (!a.pin) a.pin = genPin(); });
+  });
   window.state = state;
   localStorage.setItem('ttd_v1', JSON.stringify(state));
   if (window.fbConfigured && window.fbSave && window._fbUser) {
@@ -1640,6 +1838,9 @@ function renderYears() {
   const now = new Date();
   document.getElementById('welcomeSub').textContent = now.toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   const grid = document.getElementById('yearGrid');
+  const profile = window._userProfile;
+  const allowedYears = (profile && profile.rol !== 'admin' && profile.years && profile.years.length)
+    ? profile.years : null; // null = all years
   grid.innerHTML = '';
   let totalAlertas = 0;
   state.years.forEach((y,i) => {
@@ -1708,14 +1909,87 @@ function openYear(y, idx) {
 // ══════════════════════════════════════════════════════════
 // COMISIONES
 // ══════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
+// COMISIÓN MADRE — directorio de todos los alumnos del año
+// ══════════════════════════════════════════════════════════
+function getMadreId(year) { return 'year_' + year.id + '_all'; }
+
+function getMadre(year) {
+  var madreId = getMadreId(year);
+  var madre = year.comisiones.find(function(c) { return c.id === madreId; });
+  if (!madre) {
+    madre = {
+      id: madreId,
+      name: year.label + ' (todos los estudiantes)',
+      _esMadre: true,
+      alumnos: [], asistencias: {}, notas: {}, grupos: [], eventos: []
+    };
+    year.comisiones.unshift(madre);
+  }
+  return madre;
+}
+
+function syncMadre(year) {
+  // Rebuild madre from all specific comisiones
+  var madre = getMadre(year);
+  var allAlumnos = [];
+  var seen = {};
+  year.comisiones.forEach(function(c) {
+    if (c._esMadre) return;
+    (c.alumnos||[]).forEach(function(a) {
+      if (!seen[a.id]) {
+        seen[a.id] = true;
+        allAlumnos.push(a);
+      }
+    });
+  });
+  // Also keep alumnos that are only in madre (not yet assigned)
+  (madre.alumnos||[]).forEach(function(a) {
+    if (!seen[a.id]) {
+      seen[a.id] = true;
+      allAlumnos.push(a);
+    }
+  });
+  madre.alumnos = allAlumnos;
+}
+
+function getComisionesEspecificas(year) {
+  return (year.comisiones||[]).filter(function(c) { return !c._esMadre; });
+}
+
+function isAlumnoEnComision(alumnoId, comision) {
+  return (comision.alumnos||[]).some(function(a) { return a.id === alumnoId; });
+}
+
+function asignarAlumnoAComision(alumnoId, year, targetComId) {
+  var madre = getMadre(year);
+  var alumno = (madre.alumnos||[]).find(function(a) { return a.id === alumnoId; });
+  if (!alumno) return false;
+  var target = year.comisiones.find(function(c) { return c.id === targetComId; });
+  if (!target || target._esMadre) return false;
+  if (!target.alumnos.some(function(a) { return a.id === alumnoId; })) {
+    target.alumnos.push(alumno);
+  }
+  return true;
+}
+
+function quitarAlumnoDeComision(alumnoId, year, comId) {
+  var com = year.comisiones.find(function(c) { return c.id === comId; });
+  if (!com || com._esMadre) return;
+  com.alumnos = (com.alumnos||[]).filter(function(a) { return a.id !== alumnoId; });
+  // Also remove notas/asistencias if needed (keep them in case reassigned)
+}
+
+
 function renderComisiones() {
+  syncMadre(currentYear);
   document.getElementById('comisTitle').textContent = currentYear.label + ' — Comisiones';
   // Próxima clase
   const proxima = getProximaClase(currentYear);
   let proximaHTML = '';
   if (proxima) {
     const dateStr = new Date(proxima.fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
-    proximaHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;border-left:3px solid var(--ttd)"><div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:4px">Próxima clase</div><div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--text);letter-spacing:1px">${proxima.titulo}</div><div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);margin-top:2px">${dateStr}</div></div>`;
+    proximaHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;border-left:3px solid var(--ttd)"><div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:4px">Próxima clase</div><div style="font-family:Bebas Neue,sans-serif;font-size:18px;color:var(--text);letter-spacing:1px">${proxima.titulo}</div><div style="font-family:DM Mono,monospace;font-size:11px;color:var(--ttd);margin-top:2px">${dateStr}</div></div>`;
   }
   document.getElementById('proximaClaseBanner').innerHTML = proximaHTML;
   const list = document.getElementById('comisionList');
@@ -1724,9 +1998,12 @@ function renderComisiones() {
     const card = document.createElement('div');
     card.className = 'comision-card';
     const al = getAlertasComision(c);
-    card.innerHTML = `
-      <div><div class="comision-name">${c.name}</div><div class="comision-meta">${c.alumnos?.length||0} alumnos · ${Object.keys(c.asistencias||{}).length} clases${al.length?` · <span style="color:var(--ausente)">! ${al.length} en riesgo</span>`:''}  </div></div><span style="color:var(--text3);font-size:18px">›</span>
-    `;
+    if (c._esMadre) {
+      card.style.cssText += ';border-left:3px solid var(--ttd);background:rgba(255,92,0,.04)';
+      card.innerHTML = '<div><div class="comision-name" style="color:var(--ttd)">' + c.name + '</div><div class="comision-meta">' + (c.alumnos?.length||0) + ' alumnos en el año</div></div><span style="color:var(--ttd);font-size:18px">›</span>';
+    } else {
+      card.innerHTML = '<div><div class="comision-name">' + c.name + '</div><div class="comision-meta">' + (c.alumnos?.length||0) + ' alumnos · ' + Object.keys(c.asistencias||{}).length + ' clases' + (al.length?' · <span style="color:var(--ausente)">! ' + al.length + ' en riesgo</span>':'') + '</div></div><span style="color:var(--text3);font-size:18px">›</span>';
+    }
     card.onclick = () => openComision(c);
     list.appendChild(card);
   });
@@ -1740,7 +2017,7 @@ function confirmAddComision() {
   const name = document.getElementById('newComisionInput').value.trim();
   if (!name) return;
   currentYear.comisiones.push({id:'c'+Date.now(),name,alumnos:[],asistencias:{},notas:{},grupos:[],drive:null,eventos:[]});
-  save(); renderComisiones(); closeModalById('modalComision'); toast('Comisión creada');
+  getMadre(currentYear); save(); renderComisiones(); closeModalById('modalComision'); toast('Comisión creada');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1750,10 +2027,17 @@ function openComision(c) {
   currentComision = c;
   navStack = ['view-years','view-comisiones','view-comision'];
   document.getElementById('dateInput').value = new Date().toISOString().split('T')[0]; setTimeout(updateDateDisplay, 10);
-  document.getElementById('comisionPill').textContent = `${currentYear.label} · ${c.name}`;
+  document.getElementById('comisionPill').textContent = currentYear.label + ' · ' + c.name;
   if (!c.grupos) c.grupos = [];
   if (!c.eventos) c.eventos = [];
-  switchTab('asistencia');
+  if (c._esMadre) {
+    switchTab('asistencia');
+    // Show special madre header
+    document.getElementById('comisionPill').innerHTML =
+      '<span style="color:var(--ttd)">' + currentYear.label + ' — todos los estudiantes</span>';
+  } else {
+    switchTab('asistencia');
+  }
   showViewDirect('view-comision');
   updateHeader();
 }
@@ -1850,7 +2134,8 @@ function renderAlumnos() {
     row.innerHTML = `
       <div class="alumno-header"><div style="flex:1"><div class="alumno-name">${displayName(a)} ${enRiesgo?'<span class="riesgo-icon">!</span>':''}</div>
           ${si?`<div class="alumno-info">${si}</div>`:''}
-          ${a.pin?`<div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3);margin-top:3px;letter-spacing:1px">PIN estudiante: <strong style="color:var(--text2);letter-spacing:2px">${a.pin}</strong></div>`:''}
+          ${a.pin?`<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);margin-top:3px;letter-spacing:1px">PIN estudiante: <strong style="color:var(--text2);letter-spacing:2px">${a.pin}</strong></div>`
+          + (currentComision && currentComision._esMadre && currentYear ? renderMadreChips(a.id) : ''):''}
           <div class="alumno-badges"><span class="estado-badge estado-${estadoLabel}" onclick="showEstadoModal('${a.id}')" style="cursor:pointer">${estadoLabel}</span>
             ${pct!==null?`<span style="font-size:10px;color:${pct>=75?'var(--teal)':'var(--ausente)'}">${pct}% asist.</span>`:''}
           </div></div><div style="display:flex;gap:6px;flex-shrink:0"><button class="obs-btn" onclick="showObsModal('${a.id}')" title="Observación">${n.observacion?'':''}</button><button class="btn-del" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:2px 4px" onclick="delAlumno('${a.id}')">×</button></div></div>
@@ -1867,7 +2152,7 @@ function renderContadorReg() {
   const restantes = Math.max(0, total - fechas);
   const pctCursado = Math.round((fechas/total)*100);
   box.innerHTML = `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:12px;color:var(--text2)">Progreso del cuatrimestre</span><span style="font-family:'DM Mono',monospace;font-size:12px;color:var(--ttd)">${fechas}/${total} clases</span></div><div class="reg-bar"><div class="reg-bar-fill" style="width:${pctCursado}%;background:var(--text)"></div></div><div class="reg-label">${restantes} clases restantes · mínimo 75% asistencia para regularizar</div></div>`;
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:12px;color:var(--text2)">Progreso del cuatrimestre</span><span style="font-family:DM Mono,monospace;font-size:12px;color:var(--ttd)">${fechas}/${total} clases</span></div><div class="reg-bar"><div class="reg-bar-fill" style="width:${pctCursado}%;background:var(--text)"></div></div><div class="reg-label">${restantes} clases restantes · mínimo 75% asistencia para regularizar</div></div>`;
 }
 
 function setAsist(id, estado, btn) {
@@ -1880,13 +2165,48 @@ function setAsist(id, estado, btn) {
 }
 
 function delAlumno(id) {
-  if (!confirm(`¿Estás seguro de que querés eliminar este alumno? Se guardará en la papelera por si lo necesitás.`)) return;
+  const a = currentComision.alumnos.find(x => x.id===id);
+  if (!a) return;
+  const nombre = (a.apellido ? a.apellido+', '+a.nombre : a.nombre);
+  _pendingArchiveId = id;
+  document.getElementById('archiveModalNombre').textContent = nombre;
+  document.getElementById('modalArchivar').classList.add('open');
+}
+let _pendingArchiveId = null;
+function confirmArchive() {
+  const id = _pendingArchiveId;
+  if (!id) return;
+  _pendingArchiveId = null;
+  closeModalById('modalArchivar');
   const a = currentComision.alumnos.find(x => x.id===id);
   if (a) {
-    state.papelera.push({...a, _comision: currentComision.name, _year: currentYear.label, _fecha: new Date().toISOString()});
+    if (!state.papelera) state.papelera = [];
+    state.papelera.push(Object.assign({}, a, {
+      _comision: currentComision.name, _year: currentYear.label,
+      _comisionId: currentComision.id, _yearId: currentYear.id,
+      _fecha: new Date().toISOString()
+    }));
   }
-  currentComision.alumnos = currentComision.alumnos.filter(a => a.id!==id);
-  save(); renderAlumnos(); toast('Alumno movido a la papelera');
+  currentComision.alumnos = currentComision.alumnos.filter(x => x.id!==id);
+  save(); renderAlumnos(); toast('Alumno archivado');
+}
+function restaurarAlumno(id) {
+  const idx = state.papelera.findIndex(a => a.id===id);
+  if (idx < 0) return;
+  const a = state.papelera[idx];
+  const year = state.years.find(y => y.id===a._yearId);
+  const com = year && year.comisiones.find(c => c.id===a._comisionId);
+  if (com) {
+    const restored = Object.assign({}, a);
+    delete restored._comision; delete restored._year;
+    delete restored._comisionId; delete restored._yearId; delete restored._fecha;
+    com.alumnos.push(restored);
+    state.papelera.splice(idx, 1);
+    save(); toast('Alumno restaurado a ' + a._comision);
+    renderPapelera();
+  } else {
+    toast('La comisión original ya no existe');
+  }
 }
 function saveAsistencia() { save(); toast(' Asistencia guardada'); renderYears(); }
 
@@ -1945,11 +2265,24 @@ function confirmAddAlumnos() {
     nuevos=parsedAlumnos;
     if(!nuevos.length){toast('! No hay alumnos para importar');return;}
   }
+  if (_addingToPool) {
+    _addingToPool = false;
+    if (!currentYear.pool) currentYear.pool = [];
+    nuevos.forEach(function(n) {
+      if (!n.id) n.id = 'p'+Date.now()+Math.random().toString(36).slice(2,6);
+      if (!n.pin) n.pin = genPin();
+      if (!currentYear.pool.some(function(x){ return x.id===n.id; })) currentYear.pool.push(n);
+    });
+    save(); renderPoolAlumnos(currentYear);
+    closeModalById('modalAlumno'); toast(nuevos.length + ' alumno(s) agregados al pool');
+    return;
+  }
   let added=0;
   nuevos.forEach(n=>{
     const dup=currentComision.alumnos.some(a=>(n.legajo&&a.legajo&&n.legajo===a.legajo)||(!n.legajo&&a.nombre===n.nombre&&a.apellido===n.apellido));
     if(!dup){if(!n.pin)n.pin=genPin();currentComision.alumnos.push(n);added++;}
   });
+  if (currentYear) syncMadre(currentYear);
   save(); renderAlumnos(); closeModalById('modalAlumno');
   toast(` ${added} alumno${added!==1?'s':''} agregado${added!==1?'s':''}`);
 }
@@ -2056,7 +2389,7 @@ function renderNotas() {
         <button class="nst-btn ${notasModo==='por-trabajo'?'active':''}" data-modo="por-trabajo" style="padding:7px 10px;font-size:11px" onclick="setNotasModo('por-trabajo')">Por trabajo</button>
         <button class="nst-btn ${notasModo==='por-grupo'?'active':''}" data-modo="por-grupo" style="padding:7px 10px;font-size:11px" onclick="setNotasModo('por-grupo')">Por grupo</button>
       </div>
-      <button onclick="showGestionTrabajos()" style="background:none;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;font-size:11px;font-family:'DM Mono',monospace;color:var(--text2);cursor:pointer">Editar trabajos</button>
+      <button onclick="showGestionTrabajos()" style="background:none;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;font-size:11px;font-family:DM Mono,monospace;color:var(--text2);cursor:pointer">Editar trabajos</button>
     </div>
     <div id="notasBody"></div>
   `;
@@ -2097,8 +2430,8 @@ function renderNotasPorAlumno(body) {
       const val = n ? n.valor : '\u2014';
       const hasVal = n && n.valor;
       return `<div style="flex:1;min-width:0">
-        <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${t.nombre}">${t.nombre}</div>
-        <button onclick="openNotaModal('${a.id}','${t.id}')" style="width:100%;background:${hasVal?'var(--text)':'var(--surface)'};color:${hasVal?'var(--bg)':'var(--text3)'};border:1px solid ${t.tipo==='grupal'?'var(--ttd)':'var(--border)'};border-radius:4px;padding:6px 4px;font-family:'DM Mono',monospace;font-size:13px;font-weight:600;cursor:pointer">${val}</button>
+        <div style="font-family:DM Mono,monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${t.nombre}">${t.nombre}</div>
+        <button onclick="openNotaModal('${a.id}','${t.id}')" style="width:100%;background:${hasVal?'var(--text)':'var(--surface)'};color:${hasVal?'var(--bg)':'var(--text3)'};border:1px solid ${t.tipo==='grupal'?'var(--ttd)':'var(--border)'};border-radius:4px;padding:6px 4px;font-family:DM Mono,monospace;font-size:13px;font-weight:600;cursor:pointer">${val}</button>
       </div>`;
     }).join('');
     return `<div class="alumno-row" style="margin-bottom:8px">
@@ -2117,13 +2450,13 @@ function renderNotasPorTrabajo(body) {
   const tabs = `<div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px">
     ${trabajos.map(tw => `<button class="nst-btn ${notasTrabajoActivo===tw.id?'active':''}" style="padding:6px 10px;font-size:11px;white-space:nowrap;border:1px solid ${tw.tipo==='grupal'?'var(--ttd)':'var(--border)'}" onclick="selectTrabajoTab('${tw.id}')">${tw.nombre}</button>`).join('')}
   </div>`;
-  const driveHtml = t.drive ? `<a href="${t.drive}" target="_blank" style="display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);text-decoration:none;margin-bottom:12px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Ver en Drive</a>` : '';
+  const driveHtml = t.drive ? `<a href="${t.drive}" target="_blank" style="display:flex;align-items:center;gap:6px;font-family:DM Mono,monospace;font-size:11px;color:var(--ttd);text-decoration:none;margin-bottom:12px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Ver en Drive</a>` : '';
   const rows = alumnos.map(a => {
     const n = getNota(a.id, t.id);
     const val = n ? n.valor : null;
     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
       <span style="font-size:14px;font-weight:600">${displayName(a)}</span>
-      <button onclick="openNotaModal('${a.id}','${t.id}')" style="background:${val?'var(--text)':'var(--surface)'};color:${val?'var(--bg)':'var(--text3)'};border:1px solid var(--border);border-radius:4px;padding:6px 14px;font-family:'DM Mono',monospace;font-size:14px;font-weight:600;cursor:pointer;min-width:52px">${val||'\u2014'}</button>
+      <button onclick="openNotaModal('${a.id}','${t.id}')" style="background:${val?'var(--text)':'var(--surface)'};color:${val?'var(--bg)':'var(--text3)'};border:1px solid var(--border);border-radius:4px;padding:6px 14px;font-family:DM Mono,monospace;font-size:14px;font-weight:600;cursor:pointer;min-width:52px">${val||'\u2014'}</button>
     </div>`;
   }).join('');
   body.innerHTML = tabs + driveHtml + `<div>${rows||'<div class="empty">Sin alumnos.</div>'}</div>`;
@@ -2137,7 +2470,7 @@ function renderNotasPorGrupo(body) {
   const tabs = `<div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px">
     ${trabajos.map(tw => `<button class="nst-btn ${notasTrabajoActivo===tw.id?'active':''}" style="padding:6px 10px;font-size:11px;white-space:nowrap" onclick="selectTrabajoTab('${tw.id}')">${tw.nombre}</button>`).join('')}
   </div>`;
-  const driveHtml = t.drive ? `<a href="${t.drive}" target="_blank" style="display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);text-decoration:none;margin-bottom:12px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Ver en Drive</a>` : '';
+  const driveHtml = t.drive ? `<a href="${t.drive}" target="_blank" style="display:flex;align-items:center;gap:6px;font-family:DM Mono,monospace;font-size:11px;color:var(--ttd);text-decoration:none;margin-bottom:12px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Ver en Drive</a>` : '';
   // Use comision grupos (no per-trabajo grupos needed)
   const grupos = currentComision.grupos || [];
   if (!grupos.length) { body.innerHTML = tabs + '<div class="empty">Sin grupos en esta comisión. Creálos en la tab Grupos.</div>'; return; }
@@ -2152,7 +2485,7 @@ function renderNotasPorGrupo(body) {
     return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <div style="font-weight:700;font-size:14px">${g.nombre}</div>
-        <button onclick="openGrupoNotaModal('${g.id}','${t.id}')" style="background:${val?'var(--text)':'var(--surface)'};color:${val?'var(--bg)':'var(--text3)'};border:1px solid var(--border);border-radius:4px;padding:6px 14px;font-family:'DM Mono',monospace;font-size:14px;font-weight:600;cursor:pointer;min-width:52px">${val||'\u2014'}</button>
+        <button onclick="openGrupoNotaModal('${g.id}','${t.id}')" style="background:${val?'var(--text)':'var(--surface)'};color:${val?'var(--bg)':'var(--text3)'};border:1px solid var(--border);border-radius:4px;padding:6px 14px;font-family:DM Mono,monospace;font-size:14px;font-weight:600;cursor:pointer;min-width:52px">${val||'\u2014'}</button>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px">${members}</div>
     </div>`;
@@ -2164,7 +2497,143 @@ function selectTrabajoTab(id) { notasTrabajoActivo = id; renderNotasBody(); }
 
 let _notaModal_aid = null, _notaModal_tid = null;
 
+// ══════════════════════════════════════════════════════════
+// CRITERIOS DE EVALUACIÓN
+// ══════════════════════════════════════════════════════════
+function renderCriteriosEdit(t) {
+  if (!t.criterios || !t.criterios.length) return '<div style="font-size:11px;color:var(--text3);padding:2px 0">Sin criterios — la nota es única.</div>';
+  return t.criterios.map(function(cr) {
+    return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">'
+      + '<input value="' + cr.nombre + '" onchange="renameCriterio(' + JSON.stringify(t.id) + ',' + JSON.stringify(cr.id) + ',this.value)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;color:var(--text)">'
+      + '<button onclick="deleteCriterio(' + JSON.stringify(t.id) + ',' + JSON.stringify(cr.id) + ')" style="background:none;border:none;color:var(--ausente);font-size:16px;cursor:pointer;padding:0 2px">×</button>'
+      + '</div>';
+  }).join('');
+}
+
+function addCriterio(trabajoId) {
+  var t = getTrabajos().find(function(x){ return x.id === trabajoId; });
+  if (!t) return;
+  if (!t.criterios) t.criterios = [];
+  t.criterios.push({id:'cr'+Date.now(), nombre:'Nuevo criterio'});
+  save();
+  var container = document.getElementById('criterios_' + trabajoId);
+  if (container) container.innerHTML = renderCriteriosEdit(t);
+}
+
+function renameCriterio(trabajoId, criterioId, nombre) {
+  var t = getTrabajos().find(function(x){ return x.id === trabajoId; });
+  if (!t) return;
+  var cr = (t.criterios||[]).find(function(c){ return c.id === criterioId; });
+  if (cr) { cr.nombre = nombre; save(); }
+}
+
+function deleteCriterio(trabajoId, criterioId) {
+  var t = getTrabajos().find(function(x){ return x.id === trabajoId; });
+  if (!t) return;
+  t.criterios = (t.criterios||[]).filter(function(c){ return c.id !== criterioId; });
+  save();
+  var container = document.getElementById('criterios_' + trabajoId);
+  if (container) container.innerHTML = renderCriteriosEdit(t);
+}
+
+// Open expanded nota modal with criterios + multi-docente + nota final
+function openNotaExpandida(alumnoId, trabajoId) {
+  var t = getTrabajos().find(function(x){ return x.id === trabajoId; });
+  var a = currentComision.alumnos.find(function(x){ return x.id === alumnoId; });
+  if (!t || !a) return;
+  var notas = (currentComision.notas||{})[alumnoId] || {};
+  var notaFinal = notas[trabajoId] ? notas[trabajoId].valor : '';
+  var docente = window._userProfile ? (window._userProfile.nombre||window._fbUser?.email||'Docente') : 'Docente';
+
+  // Criterios section
+  var criteriosHTML = '';
+  if (t.criterios && t.criterios.length) {
+    criteriosHTML = '<div style="margin-bottom:12px"><div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Criterios</div>';
+    t.criterios.forEach(function(cr) {
+      var crVal = (notas[trabajoId + '_cr_' + cr.id]) || '';
+      criteriosHTML += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">'
+        + '<span style="font-size:13px;color:var(--text2)">' + cr.nombre + '</span>'
+        + '<input type="text" inputmode="decimal" value="' + crVal + '" onchange="setCriterioNota(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ',' + JSON.stringify(cr.id) + ',this.value)" style="width:50px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:13px;font-family:DM Mono,monospace">'
+        + '</div>';
+    });
+    criteriosHTML += '</div>';
+  }
+
+  // Multi-docente section
+  var docenteNotas = notas[trabajoId + '_docentes'] || {};
+  var docenteHTML = '<div style="margin-bottom:12px"><div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Notas por docente</div>';
+  Object.keys(docenteNotas).forEach(function(dNombre) {
+    docenteHTML += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">'
+      + '<span style="font-size:12px;color:var(--text3)">' + dNombre + '</span>'
+      + '<span style="font-family:DM Mono,monospace;font-size:13px;font-weight:700">' + docenteNotas[dNombre] + '</span>'
+      + '</div>';
+  });
+  docenteHTML += '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">'
+    + '<input type="text" inputmode="decimal" id="miNotaDocente" placeholder="Mi nota" style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:13px;font-family:DM Mono,monospace">'
+    + '<button onclick="guardarNotaDocente(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ')" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:4px;font-size:11px;font-family:DM Mono,monospace;cursor:pointer">Guardar</button>'
+    + '</div></div>';
+
+  var html = '<div class="modal-title">' + t.nombre + ' — ' + displayName(a) + '</div>'
+    + criteriosHTML
+    + docenteHTML
+    + '<div style="border-top:2px solid var(--border);padding-top:12px;margin-top:4px">'
+    + '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Nota final</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px" id="notaFinalChips">'
+    + buildNotaChips(notaFinal, alumnoId, trabajoId)
+    + '</div></div>'
+    + '<button onclick="cerrarNotaExpandida()" style="width:100%;padding:10px;background:var(--text);color:#fff;border:none;border-radius:var(--radius-sm);font-family:Bebas Neue,sans-serif;font-size:16px;cursor:pointer">Cerrar</button>';
+
+  openModalRaw('modalGestionTrabajos', html);
+}
+
+function cerrarNotaExpandida(){closeModalById("modalGestionTrabajos");}
+
+function setCriterioNota(alumnoId, trabajoId, criterioId, valor) {
+  if (!currentComision.notas) currentComision.notas = {};
+  if (!currentComision.notas[alumnoId]) currentComision.notas[alumnoId] = {};
+  currentComision.notas[alumnoId][trabajoId + '_cr_' + criterioId] = valor;
+  save();
+}
+
+function guardarNotaDocente(alumnoId, trabajoId) {
+  var val = (document.getElementById('miNotaDocente')?.value||'').trim();
+  if (!val) return;
+  var docente = window._userProfile ? (window._userProfile.apellido||window._userProfile.nombre||window._fbUser?.email||'Docente') : 'Docente';
+  if (!currentComision.notas) currentComision.notas = {};
+  if (!currentComision.notas[alumnoId]) currentComision.notas[alumnoId] = {};
+  if (!currentComision.notas[alumnoId][trabajoId + '_docentes']) currentComision.notas[alumnoId][trabajoId + '_docentes'] = {};
+  currentComision.notas[alumnoId][trabajoId + '_docentes'][docente] = val;
+  save();
+  toast('Nota guardada');
+  openNotaExpandida(alumnoId, trabajoId);
+}
+
+function buildNotaChips(current, alumnoId, trabajoId) {
+  var chips = (state.notaSistema === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
+  return chips.map(function(v) {
+    var active = String(v) === String(current);
+    return '<button onclick="setNotaFinalDirecta(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ',' + JSON.stringify(String(v)) + ')" style="padding:6px 14px;border-radius:20px;font-size:13px;font-family:DM Mono,monospace;cursor:pointer;border:1px solid ' + (active?'var(--ttd)':'var(--border)') + ';background:' + (active?'var(--ttd)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + '">' + v + '</button>';
+  }).join('');
+}
+
+function setNotaFinalDirecta(alumnoId, trabajoId, valor) {
+  if (!currentComision.notas) currentComision.notas = {};
+  if (!currentComision.notas[alumnoId]) currentComision.notas[alumnoId] = {};
+  currentComision.notas[alumnoId][trabajoId] = {valor: valor, sistema: state.notaSistema};
+  save();
+  toast('Nota guardada');
+  var chipsEl = document.getElementById('notaFinalChips');
+  if (chipsEl) chipsEl.innerHTML = buildNotaChips(valor, alumnoId, trabajoId);
+}
+
+
 function openNotaModal(alumnoId, trabajoId) {
+  // If trabajo has criterios, open expanded modal
+  var _tw = getTrabajos().find(function(x){ return x.id === trabajoId; });
+  if (_tw && _tw.criterios && _tw.criterios.length) {
+    openNotaExpandida(alumnoId, trabajoId);
+    return;
+  }
   _notaModal_aid = alumnoId;
   _notaModal_tid = trabajoId;
   const t = getTrabajos().find(x => x.id === trabajoId);
@@ -2199,7 +2668,7 @@ function _buildNotaModal(title, chips, currentVal, confirmFn) {
   chips.forEach(v => {
     const btn = document.createElement('button');
     btn.textContent = v;
-    btn.style.cssText = 'flex:1;min-width:44px;padding:10px 6px;font-family:\'DM Mono\',monospace;font-size:14px;font-weight:600;border-radius:6px;cursor:pointer;' +
+    btn.style.cssText = 'flex:1;min-width:44px;padding:10px 6px;font-family:DM Mono,monospace;font-size:14px;font-weight:600;border-radius:6px;cursor:pointer;' +
       (v === currentVal
         ? 'border:1.5px solid var(--ttd);background:var(--ttd);color:#fff;'
         : 'border:1.5px solid var(--border);background:var(--surface);color:var(--text);');
@@ -2248,14 +2717,19 @@ function showGestionTrabajos() {
         ${i<trabajos.length-1?`<button onclick="moveTrabajoDown('${t.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer">↓</button>`:'<span style="width:20px"></span>'}
         <button onclick="deleteTrabajo('${t.id}')" style="background:none;border:none;color:var(--ausente);font-size:18px;cursor:pointer">×</button>
       </div>
-      <input value="${t.drive||''}" placeholder="Link de Google Drive (opcional)" onchange="setTrabajoDrive('${t.id}',this.value)" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:6px 10px;font-size:11px;color:var(--text);font-family:'DM Mono',monospace"/>
+      <input value="${t.drive||''}" placeholder="Link de Google Drive (opcional)" onchange="setTrabajoDrive('${t.id}',this.value)" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:6px 10px;font-size:11px;color:var(--text);font-family:DM Mono,monospace;margin-bottom:6px"/>
+      <div style="margin-top:4px">
+        <div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Criterios de evaluación</div>
+        <div id="criterios_${t.id}">${renderCriteriosEdit(t)}</div>
+        <button onclick="addCriterio('${t.id}')" style="font-size:11px;font-family:DM Mono,monospace;color:var(--ttd);background:none;border:none;cursor:pointer;padding:2px 0">+ Agregar criterio</button>
+      </div>
     </div>`;
   }).join('');
   openModalRaw('modalGestionTrabajos', `
     <div class="modal-title">Trabajos — ${currentYear?.label}</div>
     <div id="trabajosList" style="max-height:60vh;overflow-y:auto">${items}</div>
-    <button onclick="addTrabajo()" style="width:100%;margin-top:10px;padding:10px;background:none;border:1.5px dashed var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:12px;color:var(--ttd);cursor:pointer">+ Agregar trabajo</button>
-    <button onclick="closeModalById('modalGestionTrabajos');renderNotas();" style="width:100%;margin-top:8px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Listo</button>
+    <button onclick="addTrabajo()" style="width:100%;margin-top:10px;padding:10px;background:none;border:1.5px dashed var(--border);border-radius:var(--radius-sm);font-family:DM Mono,monospace;font-size:12px;color:var(--ttd);cursor:pointer">+ Agregar trabajo</button>
+    <button onclick="closeModalById('modalGestionTrabajos');renderNotas();" style="width:100%;margin-top:8px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:Bebas Neue,sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Listo</button>
   `);
 }
 
@@ -2277,7 +2751,7 @@ function addGrupoTrabajo(trabajoId) {
     <div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:4px">
       ${alumnos.map(a=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border)"><input type="checkbox" id="gt_${a.id}" style="accent-color:var(--ttd)"><label for="gt_${a.id}" style="cursor:pointer;font-size:13px">${displayName(a)}</label></div>`).join('')}
     </div>
-    <button onclick="confirmAddGrupoTrabajo('${trabajoId}')" style="width:100%;margin-top:10px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Crear</button>
+    <button onclick="confirmAddGrupoTrabajo('${trabajoId}')" style="width:100%;margin-top:10px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:Bebas Neue,sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Crear</button>
   `);
 }
 function confirmAddGrupoTrabajo(trabajoId){
@@ -2299,7 +2773,7 @@ function editGrupoTrabajo(trabajoId,grupoId){
     <div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:4px">
       ${alumnos.map(a=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border)"><input type="checkbox" id="gte_${a.id}" ${(g.miembros||[]).includes(a.id)?'checked':''} style="accent-color:var(--ttd)"><label for="gte_${a.id}" style="cursor:pointer;font-size:13px">${displayName(a)}</label></div>`).join('')}
     </div>
-    <button onclick="confirmEditGrupoTrabajo('${trabajoId}','${grupoId}')" style="width:100%;margin-top:10px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Guardar</button>
+    <button onclick="confirmEditGrupoTrabajo('${trabajoId}','${grupoId}')" style="width:100%;margin-top:10px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:Bebas Neue,sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Guardar</button>
   `);
 }
 function confirmEditGrupoTrabajo(trabajoId,grupoId){
@@ -2339,7 +2813,7 @@ function renderGrupos() {
         <div class="grupo-header">
           <div class="grupo-name">${g.nombre}</div>
           <div style="display:flex;gap:6px;align-items:center">
-            <button style="background:none;border:none;color:var(--ttd);font-size:12px;font-family:'DM Mono',monospace;cursor:pointer" onclick="editGrupo('${g.id}')">Editar</button>
+            <button style="background:none;border:none;color:var(--ttd);font-size:12px;font-family:DM Mono,monospace;cursor:pointer" onclick="editGrupo('${g.id}')">Editar</button>
             <button style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px;line-height:1" onclick="delGrupo('${g.id}')">×</button>
           </div>
         </div>
@@ -2363,7 +2837,7 @@ function editGrupo(id) {
         <label for="eg_${a.id}" style="font-size:13px;cursor:pointer">${displayName(a)}</label>
       </div>`).join('')}
     </div>
-    <button onclick="confirmEditGrupo('${id}')" style="width:100%;margin-top:12px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Guardar</button>
+    <button onclick="confirmEditGrupo('${id}')" style="width:100%;margin-top:12px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:Bebas Neue,sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Guardar</button>
   `);
   document.getElementById('modalGrupo').classList.add('open');
 }
@@ -2457,7 +2931,7 @@ function renderTransversal() {
     </div>
 
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px">
-      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Fecha de clase · ${nClases} registradas</div>
+      <div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Fecha de clase · ${nClases} registradas</div>
       <input type="date" id="txDateInput" value="${fechaActual}"
         style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font-size:14px;color:var(--text)"
         onchange="setTxFecha(this.value)"/>
@@ -2474,7 +2948,7 @@ function renderTransversal() {
           return `<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
             <div>
               <div style="font-size:13px;font-weight:600">${displayName(a)}</div>
-              <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3)">${a.yearLabel} · ${a.comisionName}</div>
+              <div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">${a.yearLabel} · ${a.comisionName}</div>
             </div>
             <div style="display:flex;gap:4px">
               <button class="asist-btn presente ${est==='P'?'active':''}" style="padding:5px 8px;font-size:11px" onclick="setTxAsist('${a.id}','P','${fechaActual}')">P</button>
@@ -2487,10 +2961,10 @@ function renderTransversal() {
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:4px">
             <div>
               <div class="grupo-name">${g.nombre}</div>
-              <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--ttd);margin-top:2px">${docenteStr}</div>
+              <div style="font-family:DM Mono,monospace;font-size:10px;color:var(--ttd);margin-top:2px">${docenteStr}</div>
             </div>
             <div style="display:flex;gap:6px">
-              <button onclick="editGrupoTx('${g.id}')" style="background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;font-family:'DM Mono',monospace">Editar</button>
+              <button onclick="editGrupoTx('${g.id}')" style="background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;font-family:DM Mono,monospace">Editar</button>
               <button onclick="delGrupoTx('${g.id}')" style="background:none;border:none;color:var(--ausente);font-size:16px;cursor:pointer">×</button>
             </div>
           </div>
@@ -2533,16 +3007,16 @@ function _renderGrupoTxModal(title, nombre, docentes, miembros) {
   openModalRaw('modalGestionTrabajos', `
     <div class="modal-title">${title}</div>
     <div style="margin-bottom:10px">
-      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Nombre del grupo (docente coordinador)</div>
+      <div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Nombre del grupo (docente coordinador)</div>
       <input id="txGNombre" value="${nombre}" placeholder="Ej: Rodríguez / García"
         style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-size:14px;color:var(--text)"/>
     </div>
     <div style="margin-bottom:10px">
-      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Docentes coordinadores</div>
+      <div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Docentes coordinadores</div>
       <input id="txGDocentes" value="${docentes.join(', ')}" placeholder="Ej: García, López (separados por coma)"
-        style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-size:13px;color:var(--text);font-family:'DM Mono',monospace"/>
+        style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-size:13px;color:var(--text);font-family:DM Mono,monospace"/>
     </div>
-    <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Integrantes</div>
+    <div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Integrantes</div>
     <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:4px">
       ${allAlumnos.map(a => {
         const isMember = miembros.some(m => m.alumnoId===a.id);
@@ -2550,12 +3024,12 @@ function _renderGrupoTxModal(title, nombre, docentes, miembros) {
           <input type="checkbox" id="txm_${a.id}" ${isMember?'checked':''} style="accent-color:var(--ttd);flex-shrink:0">
           <label for="txm_${a.id}" style="cursor:pointer">
             <div style="font-size:13px;font-weight:600">${displayName(a)}</div>
-            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3)">${a.yearLabel} · ${a.comisionName}</div>
+            <div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">${a.yearLabel} · ${a.comisionName}</div>
           </label>
         </div>`;
       }).join('')}
     </div>
-    <button onclick="confirmGrupoTx()" style="width:100%;margin-top:12px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Guardar</button>
+    <button onclick="confirmGrupoTx()" style="width:100%;margin-top:12px;padding:12px;background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);font-family:Bebas Neue,sans-serif;font-size:16px;letter-spacing:1px;cursor:pointer">Guardar</button>
   `);
 }
 
@@ -2598,7 +3072,7 @@ function showImportAlumnosTx() {
       El Excel debe tener columnas: <strong>apellido</strong>, <strong>nombre</strong>, <strong>año</strong> (1-5), <strong>grupo</strong> (nombre del grupo/docente).<br>
       Opcional: <strong>docente</strong> (coordinador).
     </div>
-    <label style="display:block;background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--radius-sm);padding:14px;text-align:center;cursor:pointer;font-family:'DM Mono',monospace;font-size:12px;color:var(--ttd)">
+    <label style="display:block;background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--radius-sm);padding:14px;text-align:center;cursor:pointer;font-family:DM Mono,monospace;font-size:12px;color:var(--ttd)">
       Seleccionar Excel
       <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="importGruposTxFromExcel(this)"/>
     </label>
@@ -2707,10 +3181,10 @@ function renderNotasTxBody(trabajoId, btn) {
     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
       <div>
         <div style="font-weight:600;font-size:14px">${g.nombre}</div>
-        ${docenteStr?`<div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--ttd)">${docenteStr}</div>`:''}
+        ${docenteStr?`<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--ttd)">${docenteStr}</div>`:''}
         <div style="font-size:11px;color:var(--text3)">${g.miembros?.length||0} alumnos</div>
       </div>
-      <button onclick="setNotaTx('${t.id}','${g.id}',this)" style="background:${nota?'var(--text)':'var(--surface)'};color:${nota?'var(--bg)':'var(--text3)'};border:1px solid var(--border);border-radius:4px;padding:6px 14px;font-family:'DM Mono',monospace;font-size:14px;font-weight:600;cursor:pointer;min-width:52px">${nota||'—'}</button>
+      <button onclick="setNotaTx('${t.id}','${g.id}',this)" style="background:${nota?'var(--text)':'var(--surface)'};color:${nota?'var(--bg)':'var(--text3)'};border:1px solid var(--border);border-radius:4px;padding:6px 14px;font-family:DM Mono,monospace;font-size:14px;font-weight:600;cursor:pointer;min-width:52px">${nota||'—'}</button>
     </div>`;
   }).join('');
 
@@ -2771,19 +3245,19 @@ function renderDriveTab() {
 
   trabajosCon.forEach(t => {
     const driveLink = t.drive
-      ? `<a href="${t.drive}" target="_blank" style="display:inline-flex;align-items:center;gap:5px;font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);text-decoration:none;margin-left:10px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Drive</a>` : '';
+      ? `<a href="${t.drive}" target="_blank" style="display:inline-flex;align-items:center;gap:5px;font-family:DM Mono,monospace;font-size:11px;color:var(--ttd);text-decoration:none;margin-left:10px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Drive</a>` : '';
     const tipoBadge = t.tipo === 'grupal'
-      ? `<span style="font-size:10px;background:rgba(255,92,0,.12);color:var(--ttd);border:1px solid rgba(255,92,0,.25);border-radius:10px;padding:2px 7px;font-family:'DM Mono',monospace">grupal</span>`
-      : `<span style="font-size:10px;background:var(--surface);color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:2px 7px;font-family:'DM Mono',monospace">individual</span>`;
+      ? `<span style="font-size:10px;background:rgba(255,92,0,.12);color:var(--ttd);border:1px solid rgba(255,92,0,.25);border-radius:10px;padding:2px 7px;font-family:DM Mono,monospace">grupal</span>`
+      : `<span style="font-size:10px;background:var(--surface);color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:2px 7px;font-family:DM Mono,monospace">individual</span>`;
     const entregados = alumnos.filter(a => notas[a.id]?.[t.id+'_entrega']).length;
 
     html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span style="font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:.5px">${t.nombre}</span>
+          <span style="font-family:Bebas Neue,sans-serif;font-size:17px;letter-spacing:.5px">${t.nombre}</span>
           ${tipoBadge}${driveLink}
         </div>
-        <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3)">${entregados}/${alumnos.length}</span>
+        <span style="font-family:DM Mono,monospace;font-size:11px;color:var(--text3)">${entregados}/${alumnos.length}</span>
       </div>`;
 
     if (!alumnos.length) {
@@ -2794,7 +3268,7 @@ function renderDriveTab() {
         html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border)">
           <div>
             <div style="font-size:13px;font-weight:600">${displayName(a)}</div>
-            ${a.legajo ? `<div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3)">${a.legajo}</div>` : ''}
+            ${a.legajo ? `<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">${a.legajo}</div>` : ''}
           </div>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
             <span id="dbadge_${t.id}_${a.id}" style="padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;${entregado?'background:rgba(0,229,200,.2);color:var(--teal)':'background:rgba(100,100,120,.12);color:var(--text3)'}">${entregado ? 'Entregado' : 'Pendiente'}</span>
@@ -2849,9 +3323,14 @@ function renderCalWidget() {
   const firstDay = (d.getDay()+6)%7;
   const daysInMonth = new Date(calYear,calMonth+1,0).getDate();
   const today = new Date();
-  const eventos = currentComision.eventos||[];
+  // Merge comision + year + catedra eventos
+  const eventosComision = currentComision.eventos||[];
+  const eventosYear = (currentYear && currentYear.eventos)||[];
+  const eventosCatedra = (state.catedraEventos)||[];
+  const allEventos = [...eventosComision, ...eventosYear, ...eventosCatedra];
+  const eventos = allEventos;
   const eventDates = {};
-  eventos.forEach(e => { eventDates[e.fecha] = e.tipo; });
+  allEventos.forEach(e => { eventDates[e.fecha] = e.tipo; });
 
   let html = `<div class="cal-header"><button class="cal-nav" onclick="calNav(-1)">‹</button><div class="cal-month">${monthName.charAt(0).toUpperCase()+monthName.slice(1)}</div><button class="cal-nav" onclick="calNav(1)">›</button></div><div class="cal-grid">`;
   ['Lu','Ma','Mi','Ju','Vi','Sá','Do'].forEach(d=>{ html+=`<div class="cal-day-label">${d}</div>`; });
@@ -2875,9 +3354,9 @@ function renderCalWidget() {
   html+='</div>';
   // Legend
   html += `<div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap">
-    <div style="display:flex;align-items:center;gap:4px"><div style="width:10px;height:10px;border-radius:2px;background:var(--ttd);opacity:.85"></div><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3)">Clase</span></div>
-    <div style="display:flex;align-items:center;gap:4px"><div style="width:10px;height:10px;border-radius:2px;background:var(--ausente);opacity:.7"></div><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3)">Feriado</span></div>
-    <div style="display:flex;align-items:center;gap:4px"><div style="width:10px;height:10px;border-radius:50%;background:var(--text2)"></div><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3)">Invitado / Entrega</span></div>
+    <div style="display:flex;align-items:center;gap:4px"><div style="width:10px;height:10px;border-radius:2px;background:var(--ttd);opacity:.85"></div><span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">Clase</span></div>
+    <div style="display:flex;align-items:center;gap:4px"><div style="width:10px;height:10px;border-radius:2px;background:var(--ausente);opacity:.7"></div><span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">Feriado</span></div>
+    <div style="display:flex;align-items:center;gap:4px"><div style="width:10px;height:10px;border-radius:50%;background:var(--text2)"></div><span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">Invitado / Entrega</span></div>
   </div>`;
   widget.innerHTML=html;
 }
@@ -2887,11 +3366,11 @@ function renderCalImport() {
   if (!cont) return;
   cont.innerHTML = `
     <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
-      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Importar desde Excel</div>
+      <div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Importar desde Excel</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:10px;line-height:1.5">
         El archivo debe tener columnas: <strong>fecha</strong> (AAAA-MM-DD), <strong>titulo</strong>, <strong>tipo</strong> (clase / feriado / invitado / entrega)
       </div>
-      <label style="display:block;background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--radius-sm);padding:14px;text-align:center;cursor:pointer;font-family:'DM Mono',monospace;font-size:12px;color:var(--ttd)">
+      <label style="display:block;background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--radius-sm);padding:14px;text-align:center;cursor:pointer;font-family:DM Mono,monospace;font-size:12px;color:var(--ttd)">
         Seleccionar Excel
         <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="importCalFromExcel(this)"/>
       </label>
@@ -2952,16 +3431,18 @@ function renderCalEvents() {
 }
 function calNav(dir){calMonth+=dir;if(calMonth>11){calMonth=0;calYear++;}if(calMonth<0){calMonth=11;calYear--;}renderCalendario();}
 function selectCalDay(fecha){
-  const eventos = currentComision?.eventos || [];
-  const ev = eventos.find(e => e.fecha === fecha);
+  const allEvs = [
+    ...(currentComision?.eventos||[]),
+    ...(currentYear?.eventos||[]),
+    ...(state.catedraEventos||[])
+  ];
+  const ev = allEvs.find(e => e.fecha === fecha);
   if (ev && ev.tipo === 'clase') {
-    // Switch to asistencia tab and set date
     const dateInput = document.getElementById('dateInput');
     if (dateInput) { dateInput.value = fecha; dateInput.dispatchEvent(new Event('change')); }
     switchTab('asistencia');
     toast('Clase del ' + new Date(fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'}));
   } else {
-    // Open event creation modal for this date
     document.getElementById('eventoFecha').value=fecha;
     document.getElementById('modalEvento').classList.add('open');
   }
@@ -2977,9 +3458,19 @@ function confirmAddEvento(){
   const fecha=document.getElementById('eventoFecha').value;
   const titulo=document.getElementById('eventoTitulo').value.trim();
   if(!fecha||!titulo){toast('! Completá fecha y título');return;}
-  if(!currentComision.eventos)currentComision.eventos=[];
-  currentComision.eventos.push({id:'ev'+Date.now(),tipo:currentEventoType||'clase',fecha,titulo,desc:document.getElementById('eventoDesc').value.trim()});
-  save();closeModalById('modalEvento');renderCalendario();toast(' Evento agregado');
+  const alcance=document.getElementById('eventoAlcance')?.value||'comision';
+  const ev={id:'ev'+Date.now(),tipo:currentEventoType||'clase',fecha,titulo,desc:document.getElementById('eventoDesc').value.trim(),alcance};
+  if(alcance==='catedra'){
+    if(!state.catedraEventos)state.catedraEventos=[];
+    state.catedraEventos.push(ev);
+  } else if(alcance==='year'){
+    if(!currentYear.eventos)currentYear.eventos=[];
+    currentYear.eventos.push(ev);
+  } else {
+    if(!currentComision.eventos)currentComision.eventos=[];
+    currentComision.eventos.push(ev);
+  }
+  save();closeModalById('modalEvento');renderCalendario();renderCalWidget();toast('Evento agregado');
 }
 function delEvento(id){
   if(!confirm('¿Eliminar este evento?'))return;
@@ -3120,6 +3611,24 @@ function renderConfig(){
   if (emailEl && window._fbUser) emailEl.textContent = window._fbUser.email;
   const uInfo = document.getElementById('fbUserInfo');
   if (uInfo) uInfo.style.display = window._fbUser ? 'flex' : 'none';
+
+
+  // Admin panel: user management (only for admin role)
+  const isAdmin = !window._userProfile || window._userProfile?.rol === 'admin';
+  const adminContainer = document.getElementById('adminPanel');
+  if (adminContainer) {
+    if (isAdmin) {
+      adminContainer.style.display = 'block';
+      if (window.fbLoadAllProfiles) {
+        window.fbLoadAllProfiles().then(function(profiles) {
+          const entries = Object.entries(profiles);
+          if (!entries.length) { adminContainer.innerHTML = '<div style="font-size:12px;color:var(--text3)">Sin usuarios registrados.</div>'; return; }
+          renderAdminProfiles(entries, adminContainer);
+        });      }
+    } else {
+      adminContainer.style.display = 'none';
+    }
+  }
 
   const sys=state.notaSistema||'ambos';
   document.getElementById('sysNum').checked=sys==='numerico';
@@ -3272,9 +3781,13 @@ function renderStudentView(alumno, year, comision) {
     + (notasHTML || '<div style="font-size:13px;color:var(--text3);padding:8px 0">Sin notas cargadas.</div>')
     + '</div></div>';
   // Calendar section
-  const eventos = comision ? (comision.eventos || []) : [];
+  // Merge comision + year + catedra eventos for student view
+  const eventosC = comision ? (comision.eventos || []) : [];
+  const eventosY = year ? (year.eventos || []) : [];
+  const eventosCat = state.catedraEventos || [];
+  const eventosAll = eventosC.concat(eventosY).concat(eventosCat);
   const eventDates = {};
-  eventos.forEach(function(e){ eventDates[e.fecha] = e; });
+  eventosAll.forEach(function(e){ eventDates[e.fecha] = e; });
   const asistDates = Object.keys(asist);
   
   // Build 4-month mini calendar (Feb-May 2026 typical cuatrimestre)
@@ -3338,9 +3851,370 @@ function renderStudentView(alumno, year, comision) {
   document.getElementById('studentScreen').classList.add('open');
 }
 
+function renderAdminProfiles(entries, container) {
+  var html = '';
+  entries.forEach(function(entry) {
+    var uid = entry[0], p = entry[1];
+    var rolColor = p.rol==='admin'?'var(--ttd)':p.rol==='pendiente'?'var(--ausente)':'var(--presente)';
+    var nombre = (p.apellido ? p.apellido+', ' : '') + (p.nombre||'');
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">';
+    html += '<div><div style="font-weight:600;font-size:13px">' + nombre + '</div>';
+    var yearLabel = p.yearSolicitado === 'titular' ? 'Titular/Adjunto' : (p.yearSolicitado ? p.yearSolicitado + '° Año' : '');
+    html += '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">' + (p.email||'') + (yearLabel?' · solicitó: '+yearLabel:'') + '</div></div>';
+    html += '<span style="font-family:DM Mono,monospace;font-size:10px;padding:3px 8px;border-radius:10px;background:'+rolColor+';color:#fff">' + (p.rol||'?') + '</span></div>';
+    html += '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">';
+    ['pendiente','docente','titular','admin'].forEach(function(r) {
+      var active = p.rol === r;
+      html += '<button onclick="setUserRole(' + JSON.stringify(uid) + ',' + JSON.stringify(r) + ')" ';
+      html += 'style="padding:4px 10px;border-radius:20px;font-size:11px;font-family:DM Mono,monospace;cursor:pointer;border:1px solid var(--border);';
+      html += 'background:' + (active?'var(--text)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + '">' + r + '</button>';
+    });
+    html += '</div><div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">';
+    [1,2,3,4,5].forEach(function(y) {
+      var hasY = (p.years||[]).includes(y);
+      html += '<button onclick="toggleUserYear(' + JSON.stringify(uid) + ',' + y + ')" ';
+      html += 'style="padding:3px 8px;border-radius:20px;font-size:10px;font-family:DM Mono,monospace;cursor:pointer;border:1px solid var(--border);';
+      html += 'background:' + (hasY?'var(--ttd)':'var(--surface)') + ';color:' + (hasY?'#fff':'var(--text3)') + '">' + y + '°</button>';
+    });
+    html += '</div></div>';
+  });
+  container.innerHTML = '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;margin-bottom:12px">Gestión de accesos</div>' + html;
+}
+
+
+function setUserRole(uid, rol) {
+  if (!window.fbSaveUserProfile) return;
+  window.fbSaveUserProfile(uid, {rol}).then(function() {
+    toast('Rol actualizado'); renderConfig();
+  });
+}
+
+function toggleUserYear(uid, year) {
+  if (!window.fbLoadAllProfiles || !window.fbSaveUserProfile) return;
+  window.fbLoadAllProfiles().then(function(profiles) {
+    const p = profiles[uid] || {};
+    const years = p.years || [];
+    const idx = years.indexOf(year);
+    if (idx >= 0) years.splice(idx, 1);
+    else years.push(year);
+    years.sort();
+    window.fbSaveUserProfile(uid, {years}).then(function() {
+      toast('Acceso actualizado'); renderConfig();
+    });
+  });
+}
+
+function renderPoolAlumnos(year) {
+  const pool = year.pool || [];
+  const container = document.getElementById('poolAlumnos');
+  if (!container) return;
+  if (!pool.length) { container.innerHTML = '<div class="empty">Sin alumnos en el pool. Importá desde el botón de arriba.</div>'; return; }
+  let html = '';
+  pool.forEach(function(a) {
+    const asignado = year.comisiones.some(function(c) { return (c.alumnos||[]).some(function(al) { return al.id === a.id; }); });
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border)">';
+    html += '<div><div style="font-size:13px;font-weight:600">' + (a.apellido?a.apellido+', ':'')+a.nombre + '</div>';
+    html += '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">' + (a.legajo||'') + (asignado?' · Ya asignado':'') + '</div></div>';
+    if (!asignado) {
+      const comOpts = year.comisiones.map(function(c) { return '<option value="'+c.id+'">'+c.name+'</option>'; }).join('');
+      html += '<div style="display:flex;gap:6px;align-items:center">';
+      html += '<select id="poolDest_'+a.id+'" style="font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-xs);background:var(--surface);font-family:DM Mono,monospace">' + comOpts + '</select>';
+      html += '<button onclick="moverAlumnoDePool('+JSON.stringify(a.id)+')" style="padding:4px 10px;background:var(--ttd);color:#fff;border:none;border-radius:var(--radius-xs);font-size:11px;font-family:DM Mono,monospace;cursor:pointer">Asignar</button>';
+      html += '</div>';
+    }
+    html += '</div>';
+  });
+  container.innerHTML = html;
+}
+
+function showAddPoolAlumno() {
+  // Reuse the alumno modal but target pool instead of comision
+  _addingToPool = true;
+  document.getElementById('modalAlumno').classList.add('open');
+  document.querySelector('#modalAlumno .modal-title').textContent = 'Agregar al pool';
+}
+let _addingToPool = false;
+
+function moverAlumnoDePool(alumnoId) {
+  if (!currentYear) { toast('! Seleccioná un año primero'); return; }
+  if (!currentYear.comisiones || !currentYear.comisiones.length) {
+    toast('! Creá una comisión primero'); return;
+  }
+  const sel = document.getElementById('poolDest_' + alumnoId);
+  if (!sel) { toast('! Error al leer selector'); return; }
+  const comId = sel.value;
+  const comision = currentYear.comisiones.find(function(c) { return c.id === comId; });
+  if (!comision) { toast('! Comisión no encontrada'); return; }
+  const alumno = (currentYear.pool||[]).find(function(a) { return a.id === alumnoId; });
+  if (!alumno) { toast('! Alumno no encontrado'); return; }
+  if (!alumno.pin) alumno.pin = genPin();
+  comision.alumnos = comision.alumnos || [];
+  if (!comision.alumnos.some(function(a) { return a.id === alumnoId; })) {
+    comision.alumnos.push(alumno);
+  }
+  save();
+  toast((alumno.apellido||alumno.nombre) + ' asignado a ' + comision.name);
+  renderPoolAlumnos(currentYear);
+}
+
+function renderMadreChips(alumnoId) {
+  var coms = getComisionesEspecificas(currentYear);
+  if (!coms.length) return '<div style="font-size:10px;font-family:DM Mono,monospace;color:var(--text3);margin-top:4px">Sin comisiones creadas aun</div>';
+  var currentCom = coms.find(function(c){ return isAlumnoEnComision(alumnoId, c); });
+  var chips = '';
+  if (!currentCom) {
+    chips += '<span style="display:inline-block;font-size:10px;font-family:DM Mono,monospace;padding:3px 10px;border-radius:10px;margin:1px;border:1px solid var(--border);background:var(--surface);color:var(--text3)">Sin comision asignada</span>';
+  }
+  chips += coms.map(function(c) {
+    var active = (currentCom && currentCom.id === c.id);
+    var aid = JSON.stringify(alumnoId);
+    var cid = JSON.stringify(c.id);
+    return '<span onclick="event.stopPropagation();handleMadreChipClick(' + aid + ',' + cid + ')" style="display:inline-block;font-size:10px;font-family:DM Mono,monospace;padding:3px 10px;border-radius:10px;cursor:pointer;margin:1px;border:1px solid ' + (active?'var(--ttd)':'var(--border)') + ';background:' + (active?'var(--ttd)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + ';font-weight:' + (active?'600':'400') + '">' + c.name + '</span>';
+  }).join('');
+  return '<div style="margin-top:6px;display:flex;gap:3px;flex-wrap:wrap">' + chips + '</div>';
+}
+
+function handleMadreChipClick(alumnoId, comId) {
+  if (!currentYear) return;
+  var com = currentYear.comisiones.find(function(c){ return c.id === comId; });
+  if (!com) return;
+  var coms = getComisionesEspecificas(currentYear);
+  var currentCom = coms.find(function(c){ return isAlumnoEnComision(alumnoId, c); });
+  if (currentCom && currentCom.id === comId) {
+    // Already in this comision — do nothing (or could deassign, skip for now)
+    return;
+  }
+  if (currentCom) {
+    // Already in another comision — confirm change
+    var alumno = (getMadre(currentYear).alumnos||[]).find(function(a){ return a.id === alumnoId; });
+    var nombre = alumno ? displayName(alumno) : 'este alumno';
+    _pendingComChange = {alumnoId: alumnoId, fromComId: currentCom.id, toComId: comId};
+    document.getElementById('comChangeNombre').textContent = nombre;
+    document.getElementById('comChangeFrom').textContent = currentCom.name;
+    document.getElementById('comChangeTo').textContent = com.name;
+    document.getElementById('modalCambioComision').classList.add('open');
+  } else {
+    // No comision yet — assign directly
+    asignarAlumnoAComision(alumnoId, currentYear, comId);
+    save();
+    renderAlumnos();
+    toast('Asignado a ' + com.name);
+  }
+}
+
+var _pendingComChange = null;
+
+function confirmCambioComision() {
+  if (!_pendingComChange) return;
+  var p = _pendingComChange;
+  _pendingComChange = null;
+  closeModalById('modalCambioComision');
+  // Remove from current comision
+  quitarAlumnoDeComision(p.alumnoId, currentYear, p.fromComId);
+  // Assign to new comision
+  asignarAlumnoAComision(p.alumnoId, currentYear, p.toComId);
+  save();
+  renderAlumnos();
+  var com = currentYear.comisiones.find(function(c){ return c.id === p.toComId; });
+  toast('Alumno movido a ' + (com ? com.name : 'nueva comision'));
+}
+
+
+function toggleAlumnoEnComision(alumnoId, comId) {
+  if (!currentYear) return;
+  var com = currentYear.comisiones.find(function(c){ return c.id === comId; });
+  if (!com || com._esMadre) return;
+  if (isAlumnoEnComision(alumnoId, com)) {
+    quitarAlumnoDeComision(alumnoId, currentYear, comId);
+    toast('Alumno quitado de ' + com.name);
+  } else {
+    asignarAlumnoAComision(alumnoId, currentYear, comId);
+    toast('Alumno asignado a ' + com.name);
+  }
+  save();
+  renderAlumnos();
+}
+
+
+function moverAlumnoEntreComisiones(alumnoId, fromComId, toComId) {
+  if (!currentYear) return;
+  const fromCom = currentYear.comisiones.find(function(c) { return c.id === fromComId; });
+  const toCom = currentYear.comisiones.find(function(c) { return c.id === toComId; });
+  if (!fromCom || !toCom) return;
+  const idx = (fromCom.alumnos||[]).findIndex(function(a) { return a.id === alumnoId; });
+  if (idx < 0) return;
+  const alumno = fromCom.alumnos[idx];
+  // Copy notas and asistencias
+  const fromNotas = fromCom.notas && fromCom.notas[alumnoId] ? fromCom.notas[alumnoId] : {};
+  const fromAsist = {};
+  Object.keys(fromCom.asistencias||{}).forEach(function(fecha) {
+    if (fromCom.asistencias[fecha][alumnoId] !== undefined) {
+      fromAsist[fecha] = fromCom.asistencias[fecha][alumnoId];
+    }
+  });
+  // Add to destination
+  toCom.alumnos = toCom.alumnos || [];
+  if (!toCom.alumnos.some(function(a) { return a.id === alumnoId; })) {
+    toCom.alumnos.push(alumno);
+  }
+  if (!toCom.notas) toCom.notas = {};
+  toCom.notas[alumnoId] = Object.assign({}, fromNotas);
+  Object.keys(fromAsist).forEach(function(fecha) {
+    if (!toCom.asistencias) toCom.asistencias = {};
+    if (!toCom.asistencias[fecha]) toCom.asistencias[fecha] = {};
+    toCom.asistencias[fecha][alumnoId] = fromAsist[fecha];
+  });
+  // Remove from source
+  fromCom.alumnos.splice(idx, 1);
+  save();
+  toast(alumno.apellido + ' movido a ' + toCom.name);
+}
+
+
+// ══════════════════════════════════════════════════════════
+// VISTA AÑO COMPLETO
+// ══════════════════════════════════════════════════════════
+let _ycTab = 'notas';
+
+function showYearCompleto() {
+  if (!currentYear) return;
+  _ycTab = 'notas';
+  document.getElementById('yearCompletoTitle').textContent = currentYear.label + ' — Completo';
+  const coms = currentYear.comisiones || [];
+  document.getElementById('yearCompletoSub').textContent = coms.length + ' comisión' + (coms.length!==1?'es':'') + ' · ' + coms.reduce(function(n,c){return n+(c.alumnos||[]).length;},0) + ' alumnos';
+  navStack.push('view-year-completo');
+  showViewDirect('view-year-completo');
+  updateHeader();
+  yearCompletoTab('notas');
+}
+
+function yearCompletoTab(tab) {
+  _ycTab = tab;
+  ['notas','asistencia','drive'].forEach(function(t) {
+    const btn = document.getElementById('ycTab' + (t==='notas'?'Notas':t==='asistencia'?'Asist':'Drive'));
+    if (btn) { btn.style.background = t===tab?'var(--text)':'var(--surface)'; btn.style.color = t===tab?'#fff':'var(--text2)'; }
+  });
+  if (tab==='notas') renderYCNotas();
+  else if (tab==='asistencia') renderYCAsistencia();
+  else if (tab==='drive') renderYCDrive();
+}
+
+function _getAllAlumnos() {
+  var result = [];
+  (currentYear.comisiones||[]).forEach(function(c) {
+    (c.alumnos||[]).forEach(function(a) {
+      result.push({alumno:a, comision:c});
+    });
+  });
+  return result;
+}
+
+function renderYCNotas() {
+  var body = document.getElementById('yearCompletoBody');
+  var trabajos = currentYear.trabajos || [];
+  var all = _getAllAlumnos();
+  if (!all.length) { body.innerHTML = '<div class="empty">Sin alumnos en este año.</div>'; return; }
+
+  var html = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
+  html += '<thead><tr style="border-bottom:2px solid var(--border)">';
+  html += '<th style="text-align:left;padding:8px 6px;font-family:DM Mono,monospace;font-size:10px;font-weight:600;white-space:nowrap">Alumno</th>';
+  html += '<th style="text-align:left;padding:8px 4px;font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">Com.</th>';
+  trabajos.forEach(function(t) {
+    html += '<th style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:10px;max-width:60px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+t.nombre+'">'+t.nombre.substring(0,8)+'</th>';
+  });
+  html += '<th style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:10px">Estado</th>';
+  html += '</tr></thead><tbody>';
+
+  all.forEach(function(item) {
+    var a = item.alumno, c = item.comision;
+    var notas = (c.notas && c.notas[a.id]) || {};
+    var estadoColor = notas.estado==='libre'?'var(--ausente)':notas.estado==='regular'?'var(--presente)':'var(--text3)';
+    html += '<tr style="border-bottom:1px solid var(--border)">';
+    html += '<td style="padding:8px 6px;font-weight:600">'+(a.apellido?a.apellido+', ':'')+a.nombre+'</td>';
+    html += '<td style="padding:8px 4px;font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">'+c.name.substring(0,3)+'</td>';
+    trabajos.forEach(function(t) {
+      var n = notas[t.id];
+      var val = n ? n.valor : '—';
+      html += '<td style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:12px;font-weight:700;color:'+(n&&n.valor?'var(--text)':'var(--text3)')+'">'+val+'</td>';
+    });
+    html += '<td style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:10px;color:'+estadoColor+'">'+(notas.estado||'cursando')+'</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  body.innerHTML = html;
+}
+
+function renderYCAsistencia() {
+  var body = document.getElementById('yearCompletoBody');
+  var all = _getAllAlumnos();
+  if (!all.length) { body.innerHTML = '<div class="empty">Sin alumnos.</div>'; return; }
+  var totalClases = state.totalClases || 32;
+
+  var html = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
+  html += '<thead><tr style="border-bottom:2px solid var(--border)">';
+  html += '<th style="text-align:left;padding:8px 6px;font-family:DM Mono,monospace;font-size:10px">Alumno</th>';
+  html += '<th style="text-align:left;padding:8px 4px;font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">Com.</th>';
+  html += '<th style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:10px">P</th>';
+  html += '<th style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:10px">T</th>';
+  html += '<th style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:10px">A</th>';
+  html += '<th style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:10px">%</th>';
+  html += '</tr></thead><tbody>';
+
+  all.forEach(function(item) {
+    var a = item.alumno, c = item.comision;
+    var asist = c.asistencias || {};
+    var p=0,t=0,au=0;
+    Object.keys(asist).forEach(function(f){ var v=asist[f][a.id]; if(v==='P')p++; else if(v==='T')t++; else if(v==='A')au++; });
+    var total = p+t+au;
+    var pct = total ? Math.round(((p+t*0.5)/total)*100) : null;
+    var pctColor = pct===null?'var(--text3)':pct>=75?'var(--presente)':'var(--ausente)';
+    html += '<tr style="border-bottom:1px solid var(--border)">';
+    html += '<td style="padding:8px 6px;font-weight:600">'+(a.apellido?a.apellido+', ':'')+a.nombre+'</td>';
+    html += '<td style="padding:8px 4px;font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">'+c.name.substring(0,3)+'</td>';
+    html += '<td style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:12px;color:var(--presente)">'+p+'</td>';
+    html += '<td style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:12px;color:var(--tardanza)">'+t+'</td>';
+    html += '<td style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:12px;color:var(--ausente)">'+au+'</td>';
+    html += '<td style="text-align:center;padding:8px 4px;font-family:DM Mono,monospace;font-size:12px;font-weight:700;color:'+pctColor+'">'+(pct!==null?pct+'%':'—')+'</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  body.innerHTML = html;
+}
+
+function renderYCDrive() {
+  var body = document.getElementById('yearCompletoBody');
+  var trabajos = (currentYear.trabajos||[]).filter(function(t){ return t.drive && t.drive.trim(); });
+  if (!trabajos.length) { body.innerHTML = '<div class="empty">Sin trabajos con link de Drive en este año.</div>'; return; }
+  var all = _getAllAlumnos();
+  var html = '';
+
+  trabajos.forEach(function(t) {
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden">';
+    html += '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">';
+    html += '<span style="font-family:Bebas Neue,sans-serif;font-size:17px">'+t.nombre+'</span>';
+    var entregados = all.filter(function(item){ var n=(item.comision.notas||{})[item.alumno.id]||{}; return !!n[t.id+'_entrega']; }).length;
+    html += '<span style="font-family:DM Mono,monospace;font-size:11px;color:var(--text3)">'+entregados+'/'+all.length+'</span>';
+    html += '</div>';
+    all.forEach(function(item) {
+      var a=item.alumno, c=item.comision;
+      var notas=(c.notas||{})[a.id]||{};
+      var entregado=!!notas[t.id+'_entrega'];
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid var(--border)">';
+      html += '<div><div style="font-size:13px;font-weight:600">'+(a.apellido?a.apellido+', ':'')+a.nombre+'</div>';
+      html += '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">'+c.name+'</div></div>';
+      html += '<span style="padding:3px 8px;border-radius:20px;font-size:11px;font-family:DM Mono,monospace;'+(entregado?'background:rgba(0,180,120,.15);color:var(--presente)':'background:var(--surface);color:var(--text3)')+'">'+(entregado?'Entregado':'Pendiente')+'</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  body.innerHTML = html;
+}
+
+
 function fbLogoutAndReset() {
-  window._intentionalLogout = true;
-  setTimeout(function(){ window._intentionalLogout = false; }, 4000);
+  window._loggedOut = true;       // permanent flag — blocks any Firebase re-auth
+  window._intentionalLogout = true; // legacy compat
   if (window.fbLogout) window.fbLogout();
   window._fbUser = null;
   window._appUnlocked = false;
