@@ -1405,7 +1405,7 @@ select.input-field { cursor: pointer; }
   </button>
 </div>
 </div><!-- ═══════════ VIEW: COMISIONES ═══════════ -->
-<div class="view" id="view-comisiones"><div id="proximaClaseBanner"></div><div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="section-title" id="comisTitle" style="margin-bottom:0"></div><button onclick="showYearCompleto()" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);background:none;border:1px solid rgba(255,92,0,.3);border-radius:20px;padding:4px 12px;cursor:pointer">Ver año completo</button></div><div id="comisionList"></div><button class="btn-ghost-add" onclick="showAddComision()">+ Nueva comisión</button>
+<div class="view" id="view-comisiones" style="padding-bottom:24px"><div id="proximaClaseBanner"></div><div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="section-title" id="comisTitle" style="margin-bottom:0"></div><button onclick="showYearCompleto()" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);background:none;border:1px solid rgba(255,92,0,.3);border-radius:20px;padding:4px 12px;cursor:pointer">Ver año completo</button></div><div id="comisionList" style="margin-top:8px"></div><button class="btn-ghost-add" onclick="showAddComision()">+ Nueva comisión</button>
 
 </div><!-- ═══════════ VIEW: COMISION DETAIL ═══════════ -->
 <div class="view" id="view-comision"><div class="pill" id="comisionPill"></div><div class="tabs" id="mainTabs"><div class="tab active" onclick="switchTab('asistencia')">Asist.</div><div class="tab" onclick="switchTab('notas')">Notas</div><div class="tab" onclick="switchTab('grupos')">Grupos</div><div class="tab" onclick="switchTab('drive')">Drive</div><div class="tab" onclick="switchTab('calendario')">Cal.</div><div class="tab" onclick="switchTab('historial')">Hist.</div><div class="tab" onclick="switchTab('resumen')">Resumen</div></div><!-- ASISTENCIA --><div id="tab-asistencia"><div id="contadorReg" style="margin-bottom:12px"></div><div class="date-bar">
@@ -2159,8 +2159,8 @@ function renderAlumnos() {
     row.innerHTML = `
       <div class="alumno-header"><div style="flex:1"><div class="alumno-name">${displayName(a)} ${enRiesgo?'<span class="riesgo-icon">!</span>':''}</div>
           ${si?`<div class="alumno-info">${si}</div>`:''}
-          ${a.pin?`<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);margin-top:3px;letter-spacing:1px">PIN estudiante: <strong style="color:var(--text2);letter-spacing:2px">${a.pin}</strong></div>`
-          + (currentComision && currentComision._esMadre && currentYear ? renderMadreChips(a.id) : ''):''}
+          ${a.pin?`<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);margin-top:3px;letter-spacing:1px">PIN estudiante: <strong style="color:var(--text2);letter-spacing:2px">${a.pin}</strong></div>`:''}
+          ${currentComision&&currentComision._esMadre&&currentYear?renderMadreChips(a.id):''}
           <div class="alumno-badges"><span class="estado-badge estado-${estadoLabel}" onclick="showEstadoModal('${a.id}')" style="cursor:pointer">${estadoLabel}</span>
             ${pct!==null?`<span style="font-size:10px;color:${pct>=75?'var(--teal)':'var(--ausente)'}">${pct}% asist.</span>`:''}
           </div></div><div style="display:flex;gap:6px;flex-shrink:0"><button class="obs-btn" onclick="showObsModal('${a.id}')" title="Observación">${n.observacion?'':''}</button><button class="btn-del" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:2px 4px" onclick="delAlumno('${a.id}')">×</button></div></div>
@@ -2528,9 +2528,11 @@ let _notaModal_aid = null, _notaModal_tid = null;
 function renderCriteriosEdit(t) {
   if (!t.criterios || !t.criterios.length) return '<div style="font-size:11px;color:var(--text3);padding:2px 0">Sin criterios — la nota es única.</div>';
   return t.criterios.map(function(cr) {
-    return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">'
-      + '<input value="' + cr.nombre + '" onchange="renameCriterio(' + JSON.stringify(t.id) + ',' + JSON.stringify(cr.id) + ',this.value)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;color:var(--text)">'
-      + '<button onclick="deleteCriterio(' + JSON.stringify(t.id) + ',' + JSON.stringify(cr.id) + ')" style="background:none;border:none;color:var(--ausente);font-size:16px;cursor:pointer;padding:0 2px">×</button>'
+    var tid = JSON.stringify(t.id);
+    var crid = JSON.stringify(cr.id);
+    return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
+      + '<input value="' + cr.nombre.replace(/"/g,'&quot;') + '" onblur="renameCriterio(' + tid + ',' + crid + ',this.value)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:13px;color:var(--text)">'
+      + '<button onclick="deleteCriterio(' + tid + ',' + crid + ')" style="background:none;border:none;color:var(--ausente);font-size:18px;cursor:pointer;padding:0 4px;line-height:1">×</button>'
       + '</div>';
   }).join('');
 }
@@ -2566,6 +2568,7 @@ function deleteCriterio(trabajoId, criterioId) {
   if (!t) return;
   t.criterios = (t.criterios||[]).filter(function(c){ return c.id !== criterioId; });
   save();
+  // Refresh the criterios container in the open modal
   var container = document.getElementById('criterios_' + trabajoId);
   if (container) container.innerHTML = renderCriteriosEdit(t);
 }
