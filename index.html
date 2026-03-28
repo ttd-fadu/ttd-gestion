@@ -264,11 +264,22 @@ window.addEventListener('load', () => {
   // Delegated click handler for madre chips
   document.addEventListener('click', function(e) {
     var chip = e.target.closest ? e.target.closest('.madre-chip') : null;
-    if (!chip) return;
-    e.stopPropagation();
-    var aid = chip.getAttribute('data-aid');
-    var cid = chip.getAttribute('data-cid');
-    if (aid && cid) handleMadreChipClick(aid, cid);
+    if (chip) {
+      e.stopPropagation();
+      var aid = chip.getAttribute('data-aid');
+      var cid = chip.getAttribute('data-cid');
+      if (aid && cid) handleMadreChipClick(aid, cid);
+      return;
+    }
+    var btn = e.target.closest ? e.target.closest('.aprueba-btn') : null;
+    if (btn) {
+      var uid = btn.getAttribute('data-uid');
+      var yearsStr = btn.getAttribute('data-years');
+      var rol = btn.getAttribute('data-rol') || 'docente';
+      var years = [];
+      try { years = JSON.parse(yearsStr); } catch(e2) {}
+      if (uid) aprobarDocente(uid, years, rol);
+    }
   });
   setTimeout(() => {
     const loading = document.getElementById('loadingScreen');
@@ -1420,10 +1431,10 @@ select.input-field { cursor: pointer; }
 </div><!-- ═══════════ VIEW: COMISION DETAIL ═══════════ -->
 <div class="view" id="view-comision"><div class="pill" id="comisionPill"></div><div class="tabs" id="mainTabs"><div class="tab active" onclick="switchTab('asistencia')">Asist.</div><div class="tab" onclick="switchTab('notas')">Notas</div><div class="tab" onclick="switchTab('grupos')">Grupos</div><div class="tab" onclick="switchTab('drive')">Drive</div><div class="tab" onclick="switchTab('calendario')">Cal.</div><div class="tab" onclick="switchTab('historial')">Hist.</div><div class="tab" onclick="switchTab('resumen')">Resumen</div></div><!-- ASISTENCIA --><div id="tab-asistencia"><div id="contadorReg" style="margin-bottom:12px"></div><div class="date-bar">
   <span class="date-label">Clase del</span>
-  <div style="position:relative;display:inline-block">
-    <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);cursor:pointer;min-width:120px;text-align:center">—</div>
-    <input type="date" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:4;border:none;background:transparent" onchange="updateDateDisplay();renderAlumnos();">
-  </div>
+  <label style="position:relative;display:inline-block;cursor:pointer">
+    <input type="date" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:5;border:none;font-size:16px" onchange="updateDateDisplay();renderAlumnos();">
+    <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);min-width:120px;text-align:center;pointer-events:none">—</div>
+  </label>
 </div><div id="alertasComision" style="margin-bottom:10px"></div><div id="alumnoList"></div><div class="action-row"><button class="btn-secondary" onclick="showModalAlumno()">+ Alumno</button><button class="btn-secondary" onclick="exportCSV()">↓ CSV</button><button class="btn-secondary" onclick="exportPDF()">↓ PDF</button></div></div><!-- NOTAS --><div id="tab-notas" style="display:none"><div id="notasList"></div><button class="btn-primary" onclick="saveNotas()">Guardar notas</button></div><!-- GRUPOS --><div id="tab-grupos" style="display:none"><div id="gruposList"></div><button class="btn-ghost-add mt8" onclick="showAddGrupo()">+ Nuevo grupo</button></div><!-- DRIVE --><div id="tab-drive" style="display:none"><div class="info-box"> Conectá una carpeta pública de Google Drive para detectar entregas automáticamente.</div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-weight:600;font-size:14px"> Google Drive</span><span id="driveStatusBadge" style="font-size:11px;color:var(--text3)">No conectado</span></div><div id="driveNotConnected"><input class="input-field" type="text" id="driveFolderUrl" placeholder="https://drive.google.com/drive/folders/..." style="margin-bottom:8px"/><button class="btn-primary" style="margin-top:0" onclick="driveConnect()">Conectar carpeta</button></div><div id="driveConnected" style="display:none"><div style="font-size:12px;color:var(--text3);margin-bottom:10px" id="driveLastSync"></div><button class="btn-secondary" onclick="driveSyncNow()" style="width:100%;justify-content:center">Sincronizar</button><div id="driveFileList" style="margin-top:12px"></div></div></div><div class="section-title mt16">Entregas por alumno</div><div id="entregaAlumnoList"></div><button class="btn-primary" onclick="saveNotas()">Guardar</button></div><!-- CALENDARIO --><div id="tab-calendario" style="display:none"><div id="calendarWidget"></div><div class="action-row"><button class="btn-secondary" onclick="showAddEvento('clase')" style="flex:1;justify-content:center">+ Clase</button><button class="btn-secondary" onclick="showAddEvento('invitado')" style="flex:1;justify-content:center">+ Invitado</button><button class="btn-secondary" onclick="showAddEvento('entrega')" style="flex:1;justify-content:center">+ Entrega</button><button class="btn-secondary" onclick="showAddEvento('feriado')" style="flex:1;justify-content:center">+ Feriado</button></div><div class="cal-event-list" id="calEventList"></div><div id="calImportArea"></div></div><!-- HISTORIAL --><div id="tab-historial" style="display:none"><div id="historialList"></div></div><!-- RESUMEN --><div id="tab-resumen" style="display:none"><div class="resumen-grid" id="resumenGrid"></div><div class="chart-wrap"><div class="chart-title">Evolución de asistencia</div><canvas id="chartCanvas" class="chart-canvas"></canvas></div><div class="section-title">Ranking de participación</div><div id="rankingList" style="margin-bottom:16px"></div><div class="section-title">Por alumno</div><div id="resumenAlumnos"></div></div>
 </div><!-- ═══════════ VIEW: PROGRAMA ═══════════ -->
 <div class="view" id="view-programa"><div class="section-title" id="programaTitleEl">Programa de la materia</div><div id="programaList"></div><button class="btn-ghost-add" onclick="showAddPrograma()">+ Agregar unidad</button>
@@ -1451,7 +1462,7 @@ select.input-field { cursor: pointer; }
 </div><!-- Modal: Agregar alumno -->
 <div class="modal-backdrop" id="modalAlumno" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Agregar Alumnos</div><div class="import-panel"><div class="import-tabs"><div class="import-tab active" onclick="switchImportTab('manual')">Manual</div><div class="import-tab" onclick="switchImportTab('paste')">Pegar</div><div class="import-tab" onclick="switchImportTab('excel')">Excel</div></div><div class="import-body"><div class="import-section active" id="import-manual"><input class="input-field" id="alumnoApellido" placeholder="Apellido *"/><input class="input-field" id="alumnoNombre" placeholder="Nombre *"/><input class="input-field" id="alumnoLegajo" placeholder="N° Legajo / DNI (opcional)"/><input class="input-field" id="alumnoEmail" placeholder="Email (opcional)" style="margin-bottom:0"/></div><div class="import-section" id="import-paste"><div class="info-box">Copiá celdas de Excel y pegálas aquí. La app detecta columnas automáticamente.</div><textarea class="input-field" id="pasteInput" placeholder="Pegá datos de Excel aquí..." oninput="parsePaste()"></textarea><div id="pastePreview"></div></div><div class="import-section" id="import-excel"><div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()" ondragover="dragOver(event)" ondragleave="dragLeave()" ondrop="dropFile(event)"><input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="handleFileInput(event)"><div style="font-size:24px;margin-bottom:8px;color:var(--text3);font-family:'DM Mono',monospace">XLS</div><div id="dropZoneText" style="font-size:13px">Tocá para subir Excel o CSV</div></div><div id="excelColMapping" style="display:none"><div class="section-title" style="margin-top:12px">Asignar columnas</div><div class="col-row"><span style="width:75px;flex-shrink:0">Apellido:</span><select class="input-field" id="mapApellido" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Nombre:</span><select class="input-field" id="mapNombre" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Legajo:</span><select class="input-field" id="mapLegajo" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Email:</span><select class="input-field" id="mapEmail" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div id="excelPreview" style="margin-top:10px"></div></div></div></div></div><div class="btn-row"><button class="btn-sm primary" onclick="confirmAddAlumnos()">Agregar</button><button class="btn-sm ghost" onclick="closeModalById('modalAlumno')">Cancelar</button></div></div>
 </div><!-- Modal: Eliminar trabajo -->
-<div class="modal-backdrop" id="modalDeleteTrabajo" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Eliminar trabajo</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px">¿Eliminás <strong id="deleteTrabNombre"></strong>?</div><div style="font-size:12px;color:var(--text3);margin-bottom:16px">Se borrarán todas las notas asociadas.</div><div class="btn-row mt8"><button class="btn-sm" style="background:var(--ausente);color:#fff;border:none" onclick="confirmDeleteTrabajo()">Eliminar</button><button class="btn-sm ghost" onclick="closeModalById('modalDeleteTrabajo')">Cancelar</button></div></div>
+<div class="modal-overlay" id="modalDeleteTrabajo" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Eliminar trabajo</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px">¿Eliminás <strong id="deleteTrabNombre"></strong>?</div><div style="font-size:12px;color:var(--text3);margin-bottom:16px">Se borrarán todas las notas asociadas.</div><div class="btn-row mt8"><button class="btn-sm" style="background:var(--ausente);color:#fff;border:none" onclick="confirmDeleteTrabajo()">Eliminar</button><button class="btn-sm ghost" onclick="closeModalById('modalDeleteTrabajo')">Cancelar</button></div></div>
 </div><!-- Modal: Cambio de comisión -->
 <div class="modal-backdrop" id="modalCambioComision" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Cambiar comisión</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px"><strong id="comChangeNombre"></strong> está en <strong id="comChangeFrom"></strong>.</div><div style="font-size:13px;color:var(--text2);margin-bottom:16px">¿Mover a <strong id="comChangeTo"></strong>?</div><div class="btn-row mt8"><button class="btn-sm primary" onclick="confirmCambioComision()">Mover</button><button class="btn-sm ghost" onclick="closeModalById('modalCambioComision')">Cancelar</button></div></div>
 </div><!-- Modal: Archivar alumno -->
@@ -2551,8 +2562,8 @@ let _notaModal_aid = null, _notaModal_tid = null;
 function renderCriteriosEdit(t) {
   if (!t.criterios || !t.criterios.length) return '<div style="font-size:11px;color:var(--text3);padding:2px 0">Sin criterios — la nota es única.</div>';
   return t.criterios.map(function(cr) {
-    var tid = JSON.stringify(t.id);
-    var crid = JSON.stringify(cr.id);
+    var tid = "'" + t.id + "'";
+    var crid = "'" + cr.id + "'";
     return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
       + '<input value="' + cr.nombre.replace(/"/g,'&quot;') + '" oninput="renameCriterio(' + tid + ',' + crid + ',this.value)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:13px;color:var(--text)">'
       + '<button onclick="deleteCriterio(' + tid + ',' + crid + ')" style="background:none;border:none;color:var(--ausente);font-size:18px;cursor:pointer;padding:0 4px;line-height:1">×</button>'
@@ -2623,7 +2634,7 @@ function openNotaExpandida(alumnoId, trabajoId) {
         var crVal = notas[trabajoId + '_cr_' + cr.id] || '';
         criteriosHTML += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">'
           + '<span style="font-size:13px;color:var(--text2)">' + cr.nombre + '</span>'
-          + '<input type="text" inputmode="decimal" value="' + crVal + '" onblur="setCriterioNota(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ',' + JSON.stringify(cr.id) + ',this.value)" style="width:55px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:14px;font-family:DM Mono,monospace">'
+          + '<input type="text" inputmode="decimal" value="' + crVal + '" onblur="setCriterioNota(' + "'" + alumnoId + "'" + ',' + "'" + trabajoId + "'" + ',' + "'" + cr.id + "'" + ',this.value)" style="width:55px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:14px;font-family:DM Mono,monospace">'
           + '</div>';
       });
       criteriosHTML += '</div>';
@@ -2633,11 +2644,11 @@ function openNotaExpandida(alumnoId, trabajoId) {
     var chipsHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">';
     chips.forEach(function(v) {
       var active = notaFinal !== null && String(v) === String(notaFinal);
-      chipsHTML += '<button onclick="setNotaFinalDirecta(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ',' + JSON.stringify(String(v)) + ')" style="padding:8px 14px;border-radius:20px;font-size:14px;font-family:DM Mono,monospace;cursor:pointer;border:1px solid ' + (active?'var(--ttd)':'var(--border)') + ';background:' + (active?'var(--ttd)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + ';font-weight:' + (active?'700':'400') + '">' + v + '</button>';
+      chipsHTML += '<button onclick="setNotaFinalDirecta(' + "'" + alumnoId + "'" + ',' + "'" + trabajoId + "'" + ',' + JSON.stringify(String(v)) + ')" style="padding:8px 14px;border-radius:20px;font-size:14px;font-family:DM Mono,monospace;cursor:pointer;border:1px solid ' + (active?'var(--ttd)':'var(--border)') + ';background:' + (active?'var(--ttd)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + ';font-weight:' + (active?'700':'400') + '">' + v + '</button>';
     });
     chipsHTML += '</div>';
     if (notaFinal) {
-      chipsHTML += '<button onclick="setNotaFinalDirecta(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ',null)" style="font-size:11px;font-family:DM Mono,monospace;color:var(--text3);background:none;border:none;cursor:pointer;padding:2px 0">Borrar nota</button>';
+      chipsHTML += '<button onclick="setNotaFinalDirecta(' + "'" + alumnoId + "'" + ',' + "'" + trabajoId + "'" + ',null)" style="font-size:11px;font-family:DM Mono,monospace;color:var(--text3);background:none;border:none;cursor:pointer;padding:2px 0">Borrar nota</button>';
     }
 
     return '<div class="modal-title">' + t.nombre + ' — ' + displayName(a) + '</div>'
@@ -2678,7 +2689,7 @@ function buildNotaChips(current, alumnoId, trabajoId) {
   var chips = (state.notaSistema === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
   return chips.map(function(v) {
     var active = String(v) === String(current);
-    return '<button onclick="setNotaFinalDirecta(' + JSON.stringify(alumnoId) + ',' + JSON.stringify(trabajoId) + ',' + JSON.stringify(String(v)) + ')" style="padding:6px 14px;border-radius:20px;font-size:13px;font-family:DM Mono,monospace;cursor:pointer;border:1px solid ' + (active?'var(--ttd)':'var(--border)') + ';background:' + (active?'var(--ttd)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + '">' + v + '</button>';
+    return '<button onclick="setNotaFinalDirecta(' + "'" + alumnoId + "'" + ',' + "'" + trabajoId + "'" + ',' + JSON.stringify(String(v)) + ')" style="padding:6px 14px;border-radius:20px;font-size:13px;font-family:DM Mono,monospace;cursor:pointer;border:1px solid ' + (active?'var(--ttd)':'var(--border)') + ';background:' + (active?'var(--ttd)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + '">' + v + '</button>';
   }).join('');
 }
 
@@ -3739,7 +3750,7 @@ function renderConfig(){
               solHTML += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,92,0,.15)">';
               solHTML += '<div><div style="font-size:13px;font-weight:600">'+(p.apellido||'')+' '+(p.nombre||'')+'</div>';
               solHTML += '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">'+(p.email||'')+' · '+yLabel+'</div></div>';
-              solHTML += '<button onclick="aprobarDocente('+JSON.stringify(uid)+','+JSON.stringify(p.years||[])+','+JSON.stringify(p.rol==='titular'?'titular':'docente')+')" style="padding:6px 14px;background:var(--ttd);color:#fff;border:none;border-radius:var(--radius-sm);font-family:DM Mono,monospace;font-size:11px;cursor:pointer">Aprobar</button>';
+              solHTML += '<button class="aprueba-btn" data-uid="' + uid.replace(/"/g,'&quot;') + '" data-years="' + JSON.stringify(p.years||[]).replace(/"/g,'&quot;') + '" data-rol="' + ((p.yearSolicitado==='titular')?'titular':'docente') + '" style="padding:6px 14px;background:var(--ttd);color:#fff;border:none;border-radius:var(--radius-sm);font-family:DM Mono,monospace;font-size:11px;cursor:pointer">Aprobar</button>';
               solHTML += '</div>';
             });
             solHTML += '</div>';
@@ -3992,14 +4003,14 @@ function renderAdminProfiles(entries, container) {
     html += '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">';
     ['pendiente','docente','titular','admin'].forEach(function(r) {
       var active = p.rol === r;
-      html += '<button onclick="setUserRole(' + JSON.stringify(uid) + ',' + JSON.stringify(r) + ')" ';
+      html += '<button onclick="setUserRole(\'' + uid + '\',\'' + r + '\')" ';
       html += 'style="padding:4px 10px;border-radius:20px;font-size:11px;font-family:DM Mono,monospace;cursor:pointer;border:1px solid var(--border);';
       html += 'background:' + (active?'var(--text)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + '">' + r + '</button>';
     });
     html += '</div><div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">';
     [1,2,3,4,5].forEach(function(y) {
       var hasY = (p.years||[]).includes(y);
-      html += '<button onclick="toggleUserYear(' + JSON.stringify(uid) + ',' + y + ')" ';
+      html += '<button onclick="toggleUserYear(\'' + uid + '\',' + y + ')" ';
       html += 'style="padding:3px 8px;border-radius:20px;font-size:10px;font-family:DM Mono,monospace;cursor:pointer;border:1px solid var(--border);';
       html += 'background:' + (hasY?'var(--ttd)':'var(--surface)') + ';color:' + (hasY?'#fff':'var(--text3)') + '">' + y + '°</button>';
     });
@@ -4020,7 +4031,7 @@ function aprobarDocente(uid, years, rol) {
 
 function setUserRole(uid, rol) {
   if (!window.fbSaveUserProfile) return;
-  window.fbSaveUserProfile(uid, {rol}).then(function() {
+  window.fbSaveUserProfile(uid, {rol: rol}).then(function() {
     toast('Rol actualizado'); renderConfig();
   });
 }
@@ -4055,7 +4066,7 @@ function renderPoolAlumnos(year) {
       const comOpts = year.comisiones.map(function(c) { return '<option value="'+c.id+'">'+c.name+'</option>'; }).join('');
       html += '<div style="display:flex;gap:6px;align-items:center">';
       html += '<select id="poolDest_'+a.id+'" style="font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-xs);background:var(--surface);font-family:DM Mono,monospace">' + comOpts + '</select>';
-      html += '<button onclick="moverAlumnoDePool('+JSON.stringify(a.id)+')" style="padding:4px 10px;background:var(--ttd);color:#fff;border:none;border-radius:var(--radius-xs);font-size:11px;font-family:DM Mono,monospace;cursor:pointer">Asignar</button>';
+      html += '<button onclick="moverAlumnoDePool('+"'" + a.id + "'"+')" style="padding:4px 10px;background:var(--ttd);color:#fff;border:none;border-radius:var(--radius-xs);font-size:11px;font-family:DM Mono,monospace;cursor:pointer">Asignar</button>';
       html += '</div>';
     }
     html += '</div>';
