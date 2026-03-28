@@ -261,6 +261,15 @@ function exitStudentView() {
 
 // Fallback: if Firebase takes too long, loginScreen is already visible
 window.addEventListener('load', () => {
+  // Delegated click handler for madre chips
+  document.addEventListener('click', function(e) {
+    var chip = e.target.closest ? e.target.closest('.madre-chip') : null;
+    if (!chip) return;
+    e.stopPropagation();
+    var aid = chip.getAttribute('data-aid');
+    var cid = chip.getAttribute('data-cid');
+    if (aid && cid) handleMadreChipClick(aid, cid);
+  });
   setTimeout(() => {
     const loading = document.getElementById('loadingScreen');
     if (loading) loading.style.display = 'none';
@@ -1387,6 +1396,7 @@ select.input-field { cursor: pointer; }
 <div class="header" id="mainHeader" style="display:none">
   <div style="display:flex;align-items:center;gap:8px">
     <span class="header-logo">TTD</span>
+    <div id="syncDot" title="Sincronizado" style="width:7px;height:7px;border-radius:50%;background:#4caf50;margin-left:2px;transition:background 0.3s;flex-shrink:0"></div>
     <button id="btnBack" onclick="goBack()" style="display:none;background:none;border:none;cursor:pointer;padding:4px;color:var(--text2)">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
     </button>
@@ -1410,9 +1420,9 @@ select.input-field { cursor: pointer; }
 </div><!-- ═══════════ VIEW: COMISION DETAIL ═══════════ -->
 <div class="view" id="view-comision"><div class="pill" id="comisionPill"></div><div class="tabs" id="mainTabs"><div class="tab active" onclick="switchTab('asistencia')">Asist.</div><div class="tab" onclick="switchTab('notas')">Notas</div><div class="tab" onclick="switchTab('grupos')">Grupos</div><div class="tab" onclick="switchTab('drive')">Drive</div><div class="tab" onclick="switchTab('calendario')">Cal.</div><div class="tab" onclick="switchTab('historial')">Hist.</div><div class="tab" onclick="switchTab('resumen')">Resumen</div></div><!-- ASISTENCIA --><div id="tab-asistencia"><div id="contadorReg" style="margin-bottom:12px"></div><div class="date-bar">
   <span class="date-label">Clase del</span>
-  <div style="position:relative;display:inline-block;cursor:pointer" onclick="var di=document.getElementById('dateInput');try{di.showPicker()}catch(e){di.click()}">
-    <input type="date" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2;border:none" onchange="updateDateDisplay();renderAlumnos();">
-    <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);cursor:pointer;min-width:120px;text-align:center;position:relative;z-index:1">—</div>
+  <div style="position:relative;display:inline-block">
+    <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);cursor:pointer;min-width:120px;text-align:center">—</div>
+    <input type="date" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:4;border:none;background:transparent" onchange="updateDateDisplay();renderAlumnos();">
   </div>
 </div><div id="alertasComision" style="margin-bottom:10px"></div><div id="alumnoList"></div><div class="action-row"><button class="btn-secondary" onclick="showModalAlumno()">+ Alumno</button><button class="btn-secondary" onclick="exportCSV()">↓ CSV</button><button class="btn-secondary" onclick="exportPDF()">↓ PDF</button></div></div><!-- NOTAS --><div id="tab-notas" style="display:none"><div id="notasList"></div><button class="btn-primary" onclick="saveNotas()">Guardar notas</button></div><!-- GRUPOS --><div id="tab-grupos" style="display:none"><div id="gruposList"></div><button class="btn-ghost-add mt8" onclick="showAddGrupo()">+ Nuevo grupo</button></div><!-- DRIVE --><div id="tab-drive" style="display:none"><div class="info-box"> Conectá una carpeta pública de Google Drive para detectar entregas automáticamente.</div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-weight:600;font-size:14px"> Google Drive</span><span id="driveStatusBadge" style="font-size:11px;color:var(--text3)">No conectado</span></div><div id="driveNotConnected"><input class="input-field" type="text" id="driveFolderUrl" placeholder="https://drive.google.com/drive/folders/..." style="margin-bottom:8px"/><button class="btn-primary" style="margin-top:0" onclick="driveConnect()">Conectar carpeta</button></div><div id="driveConnected" style="display:none"><div style="font-size:12px;color:var(--text3);margin-bottom:10px" id="driveLastSync"></div><button class="btn-secondary" onclick="driveSyncNow()" style="width:100%;justify-content:center">Sincronizar</button><div id="driveFileList" style="margin-top:12px"></div></div></div><div class="section-title mt16">Entregas por alumno</div><div id="entregaAlumnoList"></div><button class="btn-primary" onclick="saveNotas()">Guardar</button></div><!-- CALENDARIO --><div id="tab-calendario" style="display:none"><div id="calendarWidget"></div><div class="action-row"><button class="btn-secondary" onclick="showAddEvento('clase')" style="flex:1;justify-content:center">+ Clase</button><button class="btn-secondary" onclick="showAddEvento('invitado')" style="flex:1;justify-content:center">+ Invitado</button><button class="btn-secondary" onclick="showAddEvento('entrega')" style="flex:1;justify-content:center">+ Entrega</button><button class="btn-secondary" onclick="showAddEvento('feriado')" style="flex:1;justify-content:center">+ Feriado</button></div><div class="cal-event-list" id="calEventList"></div><div id="calImportArea"></div></div><!-- HISTORIAL --><div id="tab-historial" style="display:none"><div id="historialList"></div></div><!-- RESUMEN --><div id="tab-resumen" style="display:none"><div class="resumen-grid" id="resumenGrid"></div><div class="chart-wrap"><div class="chart-title">Evolución de asistencia</div><canvas id="chartCanvas" class="chart-canvas"></canvas></div><div class="section-title">Ranking de participación</div><div id="rankingList" style="margin-bottom:16px"></div><div class="section-title">Por alumno</div><div id="resumenAlumnos"></div></div>
 </div><!-- ═══════════ VIEW: PROGRAMA ═══════════ -->
@@ -1440,6 +1450,8 @@ select.input-field { cursor: pointer; }
 <div class="modal-backdrop" id="modalComision" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Nueva comisión</div><input class="input-field" id="newComisionInput" placeholder="Ej: Comisión A, Turno Mañana..."/><div class="btn-row mt8"><button class="btn-sm primary" onclick="confirmAddComision()">Crear</button><button class="btn-sm ghost" onclick="closeModalById('modalComision')">Cancelar</button></div></div>
 </div><!-- Modal: Agregar alumno -->
 <div class="modal-backdrop" id="modalAlumno" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Agregar Alumnos</div><div class="import-panel"><div class="import-tabs"><div class="import-tab active" onclick="switchImportTab('manual')">Manual</div><div class="import-tab" onclick="switchImportTab('paste')">Pegar</div><div class="import-tab" onclick="switchImportTab('excel')">Excel</div></div><div class="import-body"><div class="import-section active" id="import-manual"><input class="input-field" id="alumnoApellido" placeholder="Apellido *"/><input class="input-field" id="alumnoNombre" placeholder="Nombre *"/><input class="input-field" id="alumnoLegajo" placeholder="N° Legajo / DNI (opcional)"/><input class="input-field" id="alumnoEmail" placeholder="Email (opcional)" style="margin-bottom:0"/></div><div class="import-section" id="import-paste"><div class="info-box">Copiá celdas de Excel y pegálas aquí. La app detecta columnas automáticamente.</div><textarea class="input-field" id="pasteInput" placeholder="Pegá datos de Excel aquí..." oninput="parsePaste()"></textarea><div id="pastePreview"></div></div><div class="import-section" id="import-excel"><div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()" ondragover="dragOver(event)" ondragleave="dragLeave()" ondrop="dropFile(event)"><input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="handleFileInput(event)"><div style="font-size:24px;margin-bottom:8px;color:var(--text3);font-family:'DM Mono',monospace">XLS</div><div id="dropZoneText" style="font-size:13px">Tocá para subir Excel o CSV</div></div><div id="excelColMapping" style="display:none"><div class="section-title" style="margin-top:12px">Asignar columnas</div><div class="col-row"><span style="width:75px;flex-shrink:0">Apellido:</span><select class="input-field" id="mapApellido" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Nombre:</span><select class="input-field" id="mapNombre" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Legajo:</span><select class="input-field" id="mapLegajo" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Email:</span><select class="input-field" id="mapEmail" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div id="excelPreview" style="margin-top:10px"></div></div></div></div></div><div class="btn-row"><button class="btn-sm primary" onclick="confirmAddAlumnos()">Agregar</button><button class="btn-sm ghost" onclick="closeModalById('modalAlumno')">Cancelar</button></div></div>
+</div><!-- Modal: Eliminar trabajo -->
+<div class="modal-backdrop" id="modalDeleteTrabajo" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Eliminar trabajo</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px">¿Eliminás <strong id="deleteTrabNombre"></strong>?</div><div style="font-size:12px;color:var(--text3);margin-bottom:16px">Se borrarán todas las notas asociadas.</div><div class="btn-row mt8"><button class="btn-sm" style="background:var(--ausente);color:#fff;border:none" onclick="confirmDeleteTrabajo()">Eliminar</button><button class="btn-sm ghost" onclick="closeModalById('modalDeleteTrabajo')">Cancelar</button></div></div>
 </div><!-- Modal: Cambio de comisión -->
 <div class="modal-backdrop" id="modalCambioComision" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Cambiar comisión</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px"><strong id="comChangeNombre"></strong> está en <strong id="comChangeFrom"></strong>.</div><div style="font-size:13px;color:var(--text2);margin-bottom:16px">¿Mover a <strong id="comChangeTo"></strong>?</div><div class="btn-row mt8"><button class="btn-sm primary" onclick="confirmCambioComision()">Mover</button><button class="btn-sm ghost" onclick="closeModalById('modalCambioComision')">Cancelar</button></div></div>
 </div><!-- Modal: Archivar alumno -->
@@ -1604,7 +1616,18 @@ function save() {
   window.state = state;
   localStorage.setItem('ttd_v1', JSON.stringify(state));
   if (window.fbConfigured && window.fbSave && window._fbUser) {
-    window.fbSave(JSON.parse(JSON.stringify(state)));
+    var dot = document.getElementById('syncDot');
+    if (dot) { dot.style.background = '#FF5C00'; dot.title = 'Guardando...'; }
+    var snap = JSON.parse(JSON.stringify(state));
+    window.fbSave(snap);
+    // fbSave is fire-and-forget; use a small delay to confirm
+    setTimeout(function() {
+      var dot2 = document.getElementById('syncDot');
+      if (dot2) { dot2.style.background = '#4caf50'; dot2.title = 'Sincronizado'; }
+    }, 1500);
+  } else if (!window._fbUser) {
+    var dot3 = document.getElementById('syncDot');
+    if (dot3) { dot3.style.background = '#999'; dot3.title = 'Sin conexión — guardado local'; }
   }
 }
 function genPin() {
@@ -2531,14 +2554,19 @@ function renderCriteriosEdit(t) {
     var tid = JSON.stringify(t.id);
     var crid = JSON.stringify(cr.id);
     return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
-      + '<input value="' + cr.nombre.replace(/"/g,'&quot;') + '" onblur="renameCriterio(' + tid + ',' + crid + ',this.value)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:13px;color:var(--text)">'
+      + '<input value="' + cr.nombre.replace(/"/g,'&quot;') + '" oninput="renameCriterio(' + tid + ',' + crid + ',this.value)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:13px;color:var(--text)">'
       + '<button onclick="deleteCriterio(' + tid + ',' + crid + ')" style="background:none;border:none;color:var(--ausente);font-size:18px;cursor:pointer;padding:0 4px;line-height:1">×</button>'
       + '</div>';
   }).join('');
 }
 
 function _getTrabajoDirecto(trabajoId) {
-  // Returns direct reference to trabajo in state (not a copy)
+  // Try currentYear first (fastest)
+  if (currentYear) {
+    var t = (currentYear.trabajos||[]).find(function(x){ return x.id===trabajoId; });
+    if (t) return t;
+  }
+  // Fallback: search all years
   var found = null;
   (state.years||[]).forEach(function(y){
     (y.trabajos||[]).forEach(function(t){ if(t.id===trabajoId) found=t; });
@@ -2585,7 +2613,7 @@ function openNotaExpandida(alumnoId, trabajoId) {
   function buildHTML() {
     var notas = (currentComision.notas||{})[alumnoId] || {};
     var notaFinal = notas[trabajoId] ? notas[trabajoId].valor : null;
-    var chips = (state.notaSistema === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
+    var chips = ((t.sistema||state.notaSistema) === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
 
     // Criterios section
     var criteriosHTML = '';
@@ -2768,6 +2796,10 @@ function showGestionTrabajos() {
           <option value="individual" ${t.tipo!=='grupal'?'selected':''}>Individual</option>
           <option value="grupal" ${t.tipo==='grupal'?'selected':''}>Grupal</option>
         </select>
+        <select onchange="setTrabajoSistema('${t.id}',this.value)" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:5px 6px;font-size:11px;color:var(--text)">
+          <option value="numerico" ${(t.sistema||'numerico')==='numerico'?'selected':''}>Num.</option>
+          <option value="conceptual" ${t.sistema==='conceptual'?'selected':''}>Conc.</option>
+        </select>
         ${i>0?`<button onclick="moveTrabajoUp('${t.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer">↑</button>`:'<span style="width:20px"></span>'}
         ${i<trabajos.length-1?`<button onclick="moveTrabajoDown('${t.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer">↓</button>`:'<span style="width:20px"></span>'}
         <button onclick="deleteTrabajo('${t.id}')" style="background:none;border:none;color:var(--ausente);font-size:18px;cursor:pointer">×</button>
@@ -2790,10 +2822,28 @@ function showGestionTrabajos() {
 
 
 function renameTrabajoInline(id,nombre){const t=getTrabajos().find(x=>x.id===id);if(t){t.nombre=nombre;save();}}
+function setTrabajoSistema(id, v){
+  var t = _getTrabajoDirecto(id);
+  if(t){ t.sistema = v; save(); }
+}
 function setTrabajoTipo(id,tipo){const t=getTrabajos().find(x=>x.id===id);if(t){t.tipo=tipo;save();showGestionTrabajos();}}
 function setTrabajoDrive(id,url){const t=getTrabajos().find(x=>x.id===id);if(t){t.drive=url;save();}}
 function addTrabajo(){getTrabajos().push({id:'tw'+Date.now(),nombre:'Nuevo trabajo',tipo:'individual',drive:'',grupos:[]});save();showGestionTrabajos();}
-function deleteTrabajo(id){currentYear.trabajos=getTrabajos().filter(t=>t.id!==id);save();showGestionTrabajos();toast('Trabajo eliminado');}
+function deleteTrabajo(id){
+  var t = _getTrabajoDirecto(id);
+  var nombre = t ? t.nombre : 'este trabajo';
+  _pendingDeleteTrabajo = id;
+  document.getElementById('deleteTrabNombre').textContent = nombre;
+  document.getElementById('modalDeleteTrabajo').classList.add('open');
+}
+var _pendingDeleteTrabajo = null;
+function confirmDeleteTrabajo(){
+  if(!_pendingDeleteTrabajo) return;
+  currentYear.trabajos = getTrabajos().filter(function(t){ return t.id!==_pendingDeleteTrabajo; });
+  _pendingDeleteTrabajo = null;
+  closeModalById('modalDeleteTrabajo');
+  save(); showGestionTrabajos(); toast('Trabajo eliminado');
+}
 function moveTrabajoUp(id){const arr=getTrabajos();const i=arr.findIndex(t=>t.id===id);if(i>0){[arr[i-1],arr[i]]=[arr[i],arr[i-1]];save();showGestionTrabajos();}}
 function moveTrabajoDown(id){const arr=getTrabajos();const i=arr.findIndex(t=>t.id===id);if(i<arr.length-1){[arr[i],arr[i+1]]=[arr[i+1],arr[i]];save();showGestionTrabajos();}}
 
@@ -3669,7 +3719,7 @@ function renderConfig(){
 
 
   // Admin panel: user management (only for admin role)
-  const isAdmin = !window._userProfile || window._userProfile?.rol === 'admin';
+  const isAdmin = !window._userProfile || window._userProfile?.rol === 'admin' || window._userProfile?.rol === 'titular';
   const adminContainer = document.getElementById('adminPanel');
   if (adminContainer) {
     if (isAdmin) {
@@ -3677,7 +3727,24 @@ function renderConfig(){
       if (window.fbLoadAllProfiles) {
         window.fbLoadAllProfiles().then(function(profiles) {
           const entries = Object.entries(profiles);
-          if (!entries.length) { adminContainer.innerHTML = '<div style="font-size:12px;color:var(--text3)">Sin usuarios registrados.</div>'; return; }
+          if (!entries.length) { adminContainer.innerHTML = '<div style="font-size:12px;color:var(--text3)">Sin solicitudes ni docentes registrados.</div>'; return; }
+          const pendientes = entries.filter(function(e){ return e[1].rol === 'pendiente'; });
+          var solHTML = '';
+          if (pendientes.length) {
+            solHTML = '<div style="background:rgba(255,92,0,.08);border:1px solid rgba(255,92,0,.25);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px">';
+            solHTML += '<div style="font-family:Bebas Neue,sans-serif;font-size:16px;color:var(--ttd);margin-bottom:10px">Solicitudes (' + pendientes.length + ')</div>';
+            pendientes.forEach(function(entry) {
+              var uid = entry[0], p = entry[1];
+              var yLabel = p.yearSolicitado==='titular'?'Titular/Adjunto':(p.yearSolicitado?p.yearSolicitado+'° Año':'N/E');
+              solHTML += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,92,0,.15)">';
+              solHTML += '<div><div style="font-size:13px;font-weight:600">'+(p.apellido||'')+' '+(p.nombre||'')+'</div>';
+              solHTML += '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3)">'+(p.email||'')+' · '+yLabel+'</div></div>';
+              solHTML += '<button onclick="aprobarDocente('+JSON.stringify(uid)+','+JSON.stringify(p.years||[])+','+JSON.stringify(p.rol==='titular'?'titular':'docente')+')" style="padding:6px 14px;background:var(--ttd);color:#fff;border:none;border-radius:var(--radius-sm);font-family:DM Mono,monospace;font-size:11px;cursor:pointer">Aprobar</button>';
+              solHTML += '</div>';
+            });
+            solHTML += '</div>';
+          }
+          adminContainer.innerHTML = solHTML;
           renderAdminProfiles(entries, adminContainer);
         });      }
     } else {
@@ -3938,9 +4005,18 @@ function renderAdminProfiles(entries, container) {
     });
     html += '</div></div>';
   });
-  container.innerHTML = '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;margin-bottom:12px">Gestión de accesos</div>' + html;
+  container.innerHTML += '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;margin:12px 0 8px">Todos los docentes</div>' + html;
 }
 
+
+function aprobarDocente(uid, years, rol) {
+  if (!window.fbSaveUserProfile) return;
+  var finalRol = rol || 'docente';
+  window.fbSaveUserProfile(uid, {rol: finalRol, years: years}).then(function() {
+    toast('Acceso aprobado');
+    renderConfig();
+  });
+}
 
 function setUserRole(uid, rol) {
   if (!window.fbSaveUserProfile) return;
@@ -4019,19 +4095,17 @@ function moverAlumnoDePool(alumnoId) {
 
 function renderMadreChips(alumnoId) {
   var coms = getComisionesEspecificas(currentYear);
-  if (!coms.length) return '<div style="font-size:10px;font-family:DM Mono,monospace;color:var(--text3);margin-top:4px">Sin comisiones creadas aun</div>';
+  if (!coms.length) return '<div style="font-size:10px;font-family:DM Mono,monospace;color:var(--text3);margin-top:4px">Sin comisiones creadas</div>';
   var currentCom = coms.find(function(c){ return isAlumnoEnComision(alumnoId, c); });
   var chips = '';
   if (!currentCom) {
-    chips += '<span style="display:inline-block;font-size:10px;font-family:DM Mono,monospace;padding:3px 10px;border-radius:10px;margin:1px;border:1px solid var(--border);background:var(--surface);color:var(--text3)">Sin comision asignada</span>';
+    chips += '<span style="display:inline-block;font-size:10px;font-family:DM Mono,monospace;padding:3px 10px;border-radius:10px;margin:2px;border:1px solid var(--border);background:var(--surface);color:var(--text3)">Sin comision asignada</span>';
   }
   chips += coms.map(function(c) {
-    var active = (currentCom && currentCom.id === c.id);
-    var aid = JSON.stringify(alumnoId);
-    var cid = JSON.stringify(c.id);
-    return '<span onclick="event.stopPropagation();handleMadreChipClick(' + aid + ',' + cid + ')" style="display:inline-block;font-size:10px;font-family:DM Mono,monospace;padding:3px 10px;border-radius:10px;cursor:pointer;margin:1px;border:1px solid ' + (active?'var(--ttd)':'var(--border)') + ';background:' + (active?'var(--ttd)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + ';font-weight:' + (active?'600':'400') + '">' + c.name + '</span>';
+    var active = !!(currentCom && currentCom.id === c.id);
+    return '<span class="madre-chip" data-aid="' + alumnoId + '" data-cid="' + c.id + '" style="display:inline-block;font-size:10px;font-family:DM Mono,monospace;padding:3px 10px;border-radius:10px;cursor:pointer;margin:2px;border:1px solid ' + (active?'var(--ttd)':'var(--border)') + ';background:' + (active?'var(--ttd)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + ';font-weight:' + (active?'600':'400') + '">' + c.name + '</span>';
   }).join('');
-  return '<div style="margin-top:6px;display:flex;gap:3px;flex-wrap:wrap">' + chips + '</div>';
+  return '<div class="madre-chips-wrap" style="margin-top:6px;display:flex;gap:2px;flex-wrap:wrap">' + chips + '</div>';
 }
 
 function handleMadreChipClick(alumnoId, comId) {
