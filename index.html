@@ -8,6 +8,7 @@
 <title>TTD — Taller Transversal de Diseño</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
 <script>
 // ══════════════════════════════════════════════════════════
 // LOGIN SCREEN — PIN unificado (Alumno + Docente)
@@ -86,9 +87,9 @@ async function docenteLogin() {
     return;
   }
 
-  // Always accept PIN 1234 as offline fallback password
-  var localPin = (typeof state !== 'undefined' ? state.pin : null) || '1234';
-  if (pass === localPin || pass === '1234') {
+  // Offline fallback password (not shown in UI)
+  var localPin = (typeof state !== 'undefined' ? state.pin : null) || 'Boca9912345gm';
+  if (pass === localPin || pass === 'Boca9912345gm') {
     unlockApp(); return;
   }
 
@@ -103,13 +104,13 @@ async function docenteLogin() {
     btn.disabled = false;
     if (!err) return; // success — onAuthStateChanged calls unlockApp
     if (err === 'timeout') {
-      errEl.textContent = 'Sin conexión. Usá PIN local 1234 como contraseña.';
+      errEl.textContent = 'Sin conexión. Contactá al administrador.';
     } else {
       errEl.textContent = err;
     }
     errEl.style.display = 'block';
   } else {
-    errEl.textContent = 'Sin conexión. Usá PIN local 1234 como contraseña.';
+    errEl.textContent = 'Sin conexión. Contactá al administrador.';
     errEl.style.display = 'block';
   }
 }
@@ -241,6 +242,10 @@ function unlockApp() {
   window._loggedOut = false;
   window._intentionalLogout = false;
   window._appUnlocked = true;
+  // If no profile loaded (offline), use admin profile
+  if (!window._userProfile) {
+    window._userProfile = {rol: 'admin', years: [1,2,3,4,5], nombre: 'Admin', apellido: 'Local'};
+  }
   var ls2 = document.getElementById('loginScreen');
   if (ls2) ls2.style.display = 'none';
   var loading = document.getElementById('loadingScreen');
@@ -1095,7 +1100,7 @@ select.input-field { cursor: pointer; }
 
   try {
     firebase.initializeApp(firebaseConfig);
-    var auth = firebase.auth();
+    var auth = firebase.auth(); window.auth = auth;
     var db   = firebase.firestore();
     window.fbConfigured = true;
     window._fbReady = true;
@@ -1349,7 +1354,7 @@ select.input-field { cursor: pointer; }
         Ingresar
       </button>
       <div style="font-family:'DM Mono','Courier New',monospace;font-size:10px;color:var(--text3);text-align:center;margin-top:4px">
-        Sin conexión: PIN local 1234
+        Sin conexión: contactá al admin
       </div>
       <button onclick="loginSetMode('registro')" style="background:none;border:none;font-family:'DM Mono','Courier New',monospace;font-size:11px;color:var(--ttd);cursor:pointer;text-align:center;margin-top:8px;text-decoration:underline">
         Registrarme como docente
@@ -1441,7 +1446,8 @@ select.input-field { cursor: pointer; }
 </div><!-- ═══════════ VIEW: CONFIG ═══════════ -->
 <div class="view" id="view-config"><div class="section-title">Configuración</div>
   <div id="adminPanel" style="margin-bottom:16px"></div>
-  <div id="fbUserInfo" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center"><span id="fbUserEmail"></span><button onclick="fbLogoutAndReset()" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:11px;color:var(--ausente);cursor:pointer;padding:0">Cerrar sesión</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> PIN de acceso</div><input class="input-field" id="newPin1" type="password" inputmode="numeric" maxlength="4" placeholder="Nuevo PIN (4 dígitos)" /><input class="input-field" id="newPin2" type="password" inputmode="numeric" maxlength="4" placeholder="Confirmar PIN" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="changePin()">Cambiar PIN</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> Regularidad</div><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px">Total de clases del cuatrimestre</label><input class="input-field" id="totalClases" type="number" min="1" max="60" placeholder="Ej: 32" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="saveTotalClases()">Guardar</button></div><div style="background:rgba(255,77,106,.07);border:1px solid rgba(255,77,106,.2);border-radius:var(--radius);padding:16px"><div style="font-weight:600;margin-bottom:8px;font-family:'Bebas Neue',sans-serif;color:var(--ausente)"> Papelera de alumnos</div><div style="font-size:13px;color:var(--text2);margin-bottom:10px">Alumnos eliminados guardados como respaldo</div><div id="papeleraList"></div></div>
+  <div id="fbUserInfo" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center"><span id="fbUserEmail"></span><button onclick="fbLogoutAndReset()" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:11px;color:var(--ausente);cursor:pointer;padding:0">Cerrar sesión</button></div>
+  <div style="margin-bottom:16px"><button onclick="cambiarContrasena()" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);cursor:pointer;padding:0;text-decoration:underline">Cambiar contraseña por email</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> PIN de acceso</div><input class="input-field" id="newPin1" type="password" inputmode="numeric" maxlength="4" placeholder="Nuevo PIN (4 dígitos)" /><input class="input-field" id="newPin2" type="password" inputmode="numeric" maxlength="4" placeholder="Confirmar PIN" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="changePin()">Cambiar PIN</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> Regularidad</div><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px">Total de clases del cuatrimestre</label><input class="input-field" id="totalClases" type="number" min="1" max="60" placeholder="Ej: 32" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="saveTotalClases()">Guardar</button></div><div style="background:rgba(255,77,106,.07);border:1px solid rgba(255,77,106,.2);border-radius:var(--radius);padding:16px"><div style="font-weight:600;margin-bottom:8px;font-family:'Bebas Neue',sans-serif;color:var(--ausente)"> Papelera de alumnos</div><div style="font-size:13px;color:var(--text2);margin-bottom:10px">Alumnos eliminados guardados como respaldo</div><div id="papeleraList"></div></div>
 </div>
 <!-- ═══════════ VIEW: AÑO COMPLETO ═══════════ -->
 <div class="view" id="view-year-completo">
@@ -1462,7 +1468,7 @@ select.input-field { cursor: pointer; }
 </div><!-- Modal: Agregar alumno -->
 <div class="modal-backdrop" id="modalAlumno" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Agregar Alumnos</div><div class="import-panel"><div class="import-tabs"><div class="import-tab active" onclick="switchImportTab('manual')">Manual</div><div class="import-tab" onclick="switchImportTab('paste')">Pegar</div><div class="import-tab" onclick="switchImportTab('excel')">Excel</div></div><div class="import-body"><div class="import-section active" id="import-manual"><input class="input-field" id="alumnoApellido" placeholder="Apellido *"/><input class="input-field" id="alumnoNombre" placeholder="Nombre *"/><input class="input-field" id="alumnoLegajo" placeholder="N° Legajo / DNI (opcional)"/><input class="input-field" id="alumnoEmail" placeholder="Email (opcional)" style="margin-bottom:0"/></div><div class="import-section" id="import-paste"><div class="info-box">Copiá celdas de Excel y pegálas aquí. La app detecta columnas automáticamente.</div><textarea class="input-field" id="pasteInput" placeholder="Pegá datos de Excel aquí..." oninput="parsePaste()"></textarea><div id="pastePreview"></div></div><div class="import-section" id="import-excel"><div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()" ondragover="dragOver(event)" ondragleave="dragLeave()" ondrop="dropFile(event)"><input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="handleFileInput(event)"><div style="font-size:24px;margin-bottom:8px;color:var(--text3);font-family:'DM Mono',monospace">XLS</div><div id="dropZoneText" style="font-size:13px">Tocá para subir Excel o CSV</div></div><div id="excelColMapping" style="display:none"><div class="section-title" style="margin-top:12px">Asignar columnas</div><div class="col-row"><span style="width:75px;flex-shrink:0">Apellido:</span><select class="input-field" id="mapApellido" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Nombre:</span><select class="input-field" id="mapNombre" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Legajo:</span><select class="input-field" id="mapLegajo" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Email:</span><select class="input-field" id="mapEmail" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div id="excelPreview" style="margin-top:10px"></div></div></div></div></div><div class="btn-row"><button class="btn-sm primary" onclick="confirmAddAlumnos()">Agregar</button><button class="btn-sm ghost" onclick="closeModalById('modalAlumno')">Cancelar</button></div></div>
 </div><!-- Modal: Eliminar trabajo -->
-<div class="modal-overlay" id="modalDeleteTrabajo" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Eliminar trabajo</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px">¿Eliminás <strong id="deleteTrabNombre"></strong>?</div><div style="font-size:12px;color:var(--text3);margin-bottom:16px">Se borrarán todas las notas asociadas.</div><div class="btn-row mt8"><button class="btn-sm" style="background:var(--ausente);color:#fff;border:none" onclick="confirmDeleteTrabajo()">Eliminar</button><button class="btn-sm ghost" onclick="closeModalById('modalDeleteTrabajo')">Cancelar</button></div></div>
+<div class="modal-overlay" id="modalDeleteTrabajo" onclick="closeModal(event)" style="z-index:900"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Eliminar trabajo</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px">¿Eliminás <strong id="deleteTrabNombre"></strong>?</div><div style="font-size:12px;color:var(--text3);margin-bottom:16px">Se borrarán todas las notas asociadas.</div><div class="btn-row mt8"><button class="btn-sm" style="background:var(--ausente);color:#fff;border:none" onclick="confirmDeleteTrabajo()">Eliminar</button><button class="btn-sm ghost" onclick="closeModalById('modalDeleteTrabajo')">Cancelar</button></div></div>
 </div><!-- Modal: Cambio de comisión -->
 <div class="modal-backdrop" id="modalCambioComision" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Cambiar comisión</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px"><strong id="comChangeNombre"></strong> está en <strong id="comChangeFrom"></strong>.</div><div style="font-size:13px;color:var(--text2);margin-bottom:16px">¿Mover a <strong id="comChangeTo"></strong>?</div><div class="btn-row mt8"><button class="btn-sm primary" onclick="confirmCambioComision()">Mover</button><button class="btn-sm ghost" onclick="closeModalById('modalCambioComision')">Cancelar</button></div></div>
 </div><!-- Modal: Archivar alumno -->
@@ -1489,7 +1495,7 @@ select.input-field { cursor: pointer; }
 </div>
 
 <!-- Modal: gestión trabajos -->
-<div class="modal-overlay" id="modalGestionTrabajos" onclick="closeModal(event)">
+<div class="modal-overlay" id="modalGestionTrabajos" style="z-index:850" onclick="closeModal(event)">
   <div class="modal">
     <div class="modal-handle"></div>
     <!-- content injected by openModalRaw -->
@@ -1519,7 +1525,7 @@ const DEFAULT_TRABAJOS = [
 
 const DEFAULT_STATE = {
   version: 5,
-  pin: '1234',
+  pin: 'Boca9912345gm',
   notaSistema: 'numerico',
   totalClases: 32,
   papelera: [],
@@ -3755,19 +3761,19 @@ function renderConfig(){
             });
             solHTML += '</div>';
           }
-          adminContainer.innerHTML = solHTML;
-          renderAdminProfiles(entries, adminContainer);
-        });      }
+          renderAdminProfiles(entries, adminContainer, solHTML);
+        });
+      } else {
+        // Offline mode — no Firebase access
+        adminContainer.innerHTML = '<div style="background:rgba(255,92,0,.06);border:1px solid rgba(255,92,0,.2);border-radius:var(--radius);padding:14px 16px"><div style="font-family:Bebas Neue,sans-serif;font-size:16px;color:var(--ttd);margin-bottom:6px">Panel de administración</div><div style="font-size:12px;color:var(--text3);line-height:1.6">Entraste con acceso local. Para gestionar usuarios y roles, ingresá con tu cuenta de Firebase (email + contraseña).</div></div>';
+      }
     } else {
       adminContainer.style.display = 'none';
     }
   }
 
-  const sys=state.notaSistema||'ambos';
-  document.getElementById('sysNum').checked=sys==='numerico';
-  document.getElementById('sysCon').checked=sys==='conceptual';
-  document.getElementById('sysBoth').checked=sys==='ambos';
-  document.getElementById('totalClases').value=state.totalClases||32;
+  var tcEl = document.getElementById('totalClases');
+  if (tcEl) tcEl.value = state.totalClases||32;
   renderPapelera();
 }
 function saveConfig(){
@@ -3988,7 +3994,7 @@ function renderStudentView(alumno, year, comision) {
   document.getElementById('studentScreen').classList.add('open');
 }
 
-function renderAdminProfiles(entries, container) {
+function renderAdminProfiles(entries, container, solHTML) {
   var html = '';
   entries.forEach(function(entry) {
     var uid = entry[0], p = entry[1];
@@ -4016,7 +4022,7 @@ function renderAdminProfiles(entries, container) {
     });
     html += '</div></div>';
   });
-  container.innerHTML += '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;margin:12px 0 8px">Todos los docentes</div>' + html;
+  container.innerHTML = (solHTML||'') + '<div style="font-family:Bebas Neue,sans-serif;font-size:18px;margin:12px 0 8px">Todos los docentes</div>' + html;
 }
 
 
@@ -4231,7 +4237,18 @@ function showYearCompleto() {
   navStack.push('view-year-completo');
   showViewDirect('view-year-completo');
   updateHeader();
-  yearCompletoTab('notas');
+  // Wait for view to be visible before rendering
+  var _ycRetry = 0;
+  function _tryRenderYC() {
+    var body = document.getElementById('yearCompletoBody');
+    if (body && body.offsetParent !== null) {
+      yearCompletoTab('notas');
+    } else if (_ycRetry < 20) {
+      _ycRetry++;
+      setTimeout(_tryRenderYC, 50);
+    }
+  }
+  setTimeout(_tryRenderYC, 50);
 }
 
 function yearCompletoTab(tab) {
@@ -4247,9 +4264,14 @@ function yearCompletoTab(tab) {
 
 function _getAllAlumnos() {
   var result = [];
+  var seen = {};
   (currentYear.comisiones||[]).forEach(function(c) {
+    if (c._esMadre) return; // skip madre — she's a mirror
     (c.alumnos||[]).forEach(function(a) {
-      result.push({alumno:a, comision:c});
+      if (!seen[a.id]) {
+        seen[a.id] = true;
+        result.push({alumno:a, comision:c});
+      }
     });
   });
   return result;
@@ -4257,7 +4279,8 @@ function _getAllAlumnos() {
 
 function renderYCNotas() {
   var body = document.getElementById('yearCompletoBody');
-  var trabajos = currentYear.trabajos || [];
+  if (!body) return;
+  var trabajos = (currentYear && currentYear.trabajos) || [];
   var all = _getAllAlumnos();
   if (!all.length) { body.innerHTML = '<div class="empty">Sin alumnos en este año.</div>'; return; }
 
@@ -4292,6 +4315,7 @@ function renderYCNotas() {
 
 function renderYCAsistencia() {
   var body = document.getElementById('yearCompletoBody');
+  if (!body) return;
   var all = _getAllAlumnos();
   if (!all.length) { body.innerHTML = '<div class="empty">Sin alumnos.</div>'; return; }
   var totalClases = state.totalClases || 32;
@@ -4329,6 +4353,7 @@ function renderYCAsistencia() {
 
 function renderYCDrive() {
   var body = document.getElementById('yearCompletoBody');
+  if (!body) return;
   var trabajos = (currentYear.trabajos||[]).filter(function(t){ return t.drive && t.drive.trim(); });
   if (!trabajos.length) { body.innerHTML = '<div class="empty">Sin trabajos con link de Drive en este año.</div>'; return; }
   var all = _getAllAlumnos();
@@ -4354,6 +4379,24 @@ function renderYCDrive() {
     html += '</div>';
   });
   body.innerHTML = html;
+}
+
+
+function cambiarContrasena() {
+  if (!window._fbUser || !window._fbUser.email) {
+    toast('! Necesitás estar conectado con Firebase');
+    return;
+  }
+  var email = window._fbUser.email;
+  if (window.auth) {
+    window.auth.sendPasswordResetEmail(email).then(function() {
+      toast('Email de cambio de contraseña enviado a ' + email);
+    }).catch(function(e) {
+      toast('! Error: ' + e.message);
+    });
+  } else {
+    toast('! Sin conexión a Firebase');
+  }
 }
 
 
