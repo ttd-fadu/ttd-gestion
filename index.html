@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>TTD — Taller Transversal de Diseño</title>
@@ -1413,7 +1414,7 @@ select.input-field { cursor: pointer; }
   <div style="display:flex;align-items:center;gap:8px">
     <span class="header-logo">TTD</span>
     <div id="syncDot" title="Sincronizado" style="width:7px;height:7px;border-radius:50%;background:#4caf50;margin-left:2px;transition:background 0.3s;flex-shrink:0"></div>
-    <button id="btnBack" onclick="goBack()" style="display:none;background:none;border:none;cursor:pointer;padding:4px;color:var(--text2)">
+    <span class="breadcrumb" id="breadcrumb" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span><button id="btnBack" onclick="goBack()" style="display:none;background:none;border:none;cursor:pointer;padding:4px;color:var(--text2)">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
     </button>
   </div>
@@ -1869,20 +1870,21 @@ function updateHeader() {
   const back = document.getElementById('btnBack');
   const bc = document.getElementById('breadcrumb');
   const current = navStack[navStack.length-1];
+  if (!back) return; // guard: header not yet in DOM
   if (!navStack.length || navStack.length===1) {
     back.style.display='none';
-    if (current === 'view-transversal') bc.textContent = 'Ejercicio Transversal';
-    else if (current === 'view-programa') bc.textContent = 'Programa';
-    else if (current === 'view-config') bc.textContent = 'Configuración';
-    else bc.textContent = 'Inicio';
+    if (bc) {
+      if (current === 'view-transversal') bc.textContent = 'Ejercicio Transversal';
+      else if (current === 'view-programa') bc.textContent = 'Programa';
+      else if (current === 'view-config') bc.textContent = 'Configuración';
+      else bc.textContent = 'Inicio';
+    }
   } else if (navStack.length === 2) {
-    if (current === 'view-transversal') { back.style.display='flex'; bc.textContent = 'Ejercicio Transversal'; }
-    else
     back.style.display='flex';
-    bc.textContent = currentYear?.label||'';
+    if (bc) bc.textContent = current === 'view-transversal' ? 'Ejercicio Transversal' : (currentYear?.label||'');
   } else {
     back.style.display='flex';
-    bc.textContent = `${currentYear?.label} › ${currentComision?.name||''}`;
+    if (bc) bc.textContent = (currentYear?.label||'') + ' › ' + (currentComision?.name||'');
   }
 }
 
