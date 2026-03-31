@@ -1453,7 +1453,7 @@ select.input-field { cursor: pointer; }
 </div><!-- ═══════════ VIEW: COMISION DETAIL ═══════════ -->
 <div class="view" id="view-comision"><div class="pill" id="comisionPill"></div><div class="tabs" id="mainTabs"><div class="tab active" onclick="switchTab('asistencia')">Asist.</div><div class="tab" onclick="switchTab('notas')">Notas</div><div class="tab" onclick="switchTab('grupos')">Grupos</div><div class="tab" onclick="switchTab('drive')">Drive</div><div class="tab" onclick="switchTab('calendario')">Cal.</div><div class="tab" onclick="switchTab('historial')">Hist.</div><div class="tab" onclick="switchTab('resumen')">Resumen</div></div><!-- ASISTENCIA --><div id="tab-asistencia"><div id="contadorReg" style="margin-bottom:12px"></div><div class="date-bar">
   <span class="date-label">Clase del</span>
-  <label style="position:relative;display:inline-block;cursor:pointer">
+  <label for="dateInput" style="position:relative;display:inline-block;cursor:pointer">
     <input type="date" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:5;border:none;font-size:16px" onchange="updateDateDisplay();renderAlumnos();">
     <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);min-width:120px;text-align:center;pointer-events:none">—</div>
   </label>
@@ -2780,6 +2780,11 @@ function openGrupoNotaModal(grupoId, trabajoId) {
 
 function _buildNotaModal(title, chips, currentVal, confirmFn) {
   _notaConfirmFn = confirmFn;
+  // Resolve confirm function at call time
+  var confirmFnRef = confirmFn === 'confirmNota' ? confirmNota
+    : confirmFn === 'confirmNotaGrupal' ? confirmNotaGrupal
+    : confirmFn === 'confirmNotaTx' ? confirmNotaTx
+    : null;
   document.getElementById('notaModalTitle').textContent = title;
   const cont = document.getElementById('notaModalChips');
   cont.innerHTML = '';
@@ -2790,10 +2795,10 @@ function _buildNotaModal(title, chips, currentVal, confirmFn) {
       (v === currentVal
         ? 'border:1.5px solid var(--ttd);background:var(--ttd);color:#fff;'
         : 'border:1.5px solid var(--border);background:var(--surface);color:var(--text);');
-    btn.dataset.valor = v;
-    btn.dataset.confirm = confirmFn;
-    btn.addEventListener('click', () => {
-      window[btn.dataset.confirm](btn.dataset.valor);
+    var valor = v;
+    btn.addEventListener('click', function() {
+      if (confirmFnRef) confirmFnRef(valor);
+      else if (window[confirmFn]) window[confirmFn](valor);
     });
     cont.appendChild(btn);
   });
@@ -3748,7 +3753,15 @@ function togglePrograma(id){
 // ══════════════════════════════════════════════════════════
 function renderConfig(){
   const emailEl = document.getElementById('fbUserEmail');
-  if (emailEl && window._fbUser) emailEl.textContent = window._fbUser.email;
+  if (emailEl && window._fbUser) {
+    var profile = window._userProfile;
+    var nombreCompleto = (profile && (profile.nombre || profile.apellido))
+      ? ((profile.apellido ? profile.apellido + ', ' : '') + (profile.nombre || '')).trim()
+      : '';
+    emailEl.innerHTML = nombreCompleto
+      ? '<span style="font-weight:600;color:var(--text)">' + nombreCompleto + '</span> &nbsp;·&nbsp; ' + window._fbUser.email
+      : window._fbUser.email;
+  }
   const uInfo = document.getElementById('fbUserInfo');
   if (uInfo) uInfo.style.display = window._fbUser ? 'flex' : 'none';
 
