@@ -89,8 +89,8 @@ async function docenteLogin() {
   }
 
   // Offline fallback password (not shown in UI)
-  var localPin = (typeof state !== 'undefined' ? state.pin : null) || 'Boca9912345gm';
-  if (pass === localPin || pass === 'Boca9912345gm') {
+  var localPin = (typeof state !== 'undefined' ? state.pin : null) || 'Transversal2026';
+  if (pass === 'Transversal2026') {
     unlockApp(); return;
   }
 
@@ -247,6 +247,18 @@ function unlockApp() {
   if (!window._userProfile) {
     window._userProfile = {rol: 'admin', years: [1,2,3,4,5], nombre: 'Admin', apellido: 'Local'};
   }
+  // Update sync dot based on connection status
+  setTimeout(function() {
+    var dot = document.getElementById('syncDot');
+    if (!dot) return;
+    if (window._fbUser) {
+      dot.style.background = '#4caf50';
+      dot.title = 'Sincronizado con Firebase';
+    } else {
+      dot.style.background = '#999';
+      dot.title = 'Sin conexión — guardado local';
+    }
+  }, 500);
   var ls2 = document.getElementById('loginScreen');
   if (ls2) ls2.style.display = 'none';
   var loading = document.getElementById('loadingScreen');
@@ -1530,7 +1542,7 @@ const DEFAULT_TRABAJOS = [
 
 const DEFAULT_STATE = {
   version: 5,
-  pin: 'Boca9912345gm',
+  pin: 'Transversal2026',
   notaSistema: 'numerico',
   totalClases: 32,
   papelera: [],
