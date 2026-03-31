@@ -2642,52 +2642,103 @@ function openNotaExpandida(alumnoId, trabajoId) {
   var a = currentComision.alumnos.find(function(x){ return x.id===alumnoId; });
   if (!t || !a) return;
 
-  // Store context for chip updates
-  window._notaExpandida = {alumnoId: alumnoId, trabajoId: trabajoId};
+  window._notaExpandida = {alumnoId: alumnoId, trabajoId: trabajoId, t: t, a: a};
 
-  function buildHTML() {
+  function renderModal() {
     var notas = (currentComision.notas||{})[alumnoId] || {};
     var notaFinal = notas[trabajoId] ? notas[trabajoId].valor : null;
-    var chips = ((t.sistema||state.notaSistema) === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
+    var chipsVals = ((t.sistema||state.notaSistema) === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
 
-    // Criterios section
-    var criteriosHTML = '';
+    var overlay = document.getElementById('modalGestionTrabajos');
+    if (!overlay) return;
+    var box = overlay.querySelector('.modal');
+    if (!box) return;
+    box.innerHTML = '<div class="modal-handle"></div>';
+
+    // Title
+    var title = document.createElement('div');
+    title.className = 'modal-title';
+    title.textContent = t.nombre + ' — ' + displayName(a);
+    box.appendChild(title);
+
+    // Criterios
     if (t.criterios && t.criterios.length) {
-      criteriosHTML += '<div style="margin-bottom:14px"><div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Criterios</div>';
+      var crWrap = document.createElement('div');
+      crWrap.style.cssText = 'margin-bottom:14px';
+      var crLabel = document.createElement('div');
+      crLabel.style.cssText = 'font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px';
+      crLabel.textContent = 'Criterios';
+      crWrap.appendChild(crLabel);
       t.criterios.forEach(function(cr) {
         var crVal = notas[trabajoId + '_cr_' + cr.id] || '';
-        criteriosHTML += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">'
-          + '<span style="font-size:13px;color:var(--text2)">' + cr.nombre + '</span>'
-          + '<input type="text" inputmode="decimal" value="' + crVal + '" onblur="setCriterioNota(' + "'" + alumnoId + "'" + ',' + "'" + trabajoId + "'" + ',' + "'" + cr.id + "'" + ',this.value)" style="width:55px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:14px;font-family:DM Mono,monospace">'
-          + '</div>';
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)';
+        var lbl = document.createElement('span');
+        lbl.style.cssText = 'font-size:13px;color:var(--text2)';
+        lbl.textContent = cr.nombre;
+        var inp = document.createElement('input');
+        inp.type = 'text'; inp.inputMode = 'decimal'; inp.value = crVal;
+        inp.style.cssText = 'width:55px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:14px;font-family:DM Mono,monospace';
+        (function(crId){ inp.addEventListener('blur', function(){ setCriterioNota(alumnoId, trabajoId, crId, inp.value); }); })(cr.id);
+        row.appendChild(lbl); row.appendChild(inp);
+        crWrap.appendChild(row);
       });
-      criteriosHTML += '</div>';
+      box.appendChild(crWrap);
     }
 
-    // Nota final chips
-    var chipsHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">';
-    chips.forEach(function(v) {
+    // Nota final section
+    var finalWrap = document.createElement('div');
+    finalWrap.style.cssText = 'border-top:' + (t.criterios&&t.criterios.length?'2px':'1px') + ' solid var(--border);padding-top:12px;margin-top:4px';
+    var finalLabel = document.createElement('div');
+    finalLabel.style.cssText = 'font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px';
+    finalLabel.textContent = 'Nota final' + (notaFinal ? ' — ' + notaFinal : '');
+    finalWrap.appendChild(finalLabel);
+
+    var chipsWrap = document.createElement('div');
+    chipsWrap.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px';
+    chipsVals.forEach(function(v) {
       var active = notaFinal !== null && String(v) === String(notaFinal);
-      chipsHTML += '<button onclick="setNotaFinalDirecta(' + "'" + alumnoId + "'" + ',' + "'" + trabajoId + "'" + ',' + JSON.stringify(String(v)) + ')" style="padding:8px 14px;border-radius:20px;font-size:14px;font-family:DM Mono,monospace;cursor:pointer;border:1px solid ' + (active?'var(--ttd)':'var(--border)') + ';background:' + (active?'var(--ttd)':'var(--surface)') + ';color:' + (active?'#fff':'var(--text2)') + ';font-weight:' + (active?'700':'400') + '">' + v + '</button>';
+      var btn = document.createElement('button');
+      btn.textContent = v;
+      btn.style.cssText = 'padding:8px 14px;border-radius:20px;font-size:14px;font-family:DM Mono,monospace;cursor:pointer;' +
+        'border:1px solid ' + (active?'var(--ttd)':'var(--border)') + ';' +
+        'background:' + (active?'var(--ttd)':'var(--surface)') + ';' +
+        'color:' + (active?'#fff':'var(--text2)') + ';' +
+        'font-weight:' + (active?'700':'400');
+      (function(val){ btn.addEventListener('click', function(){
+        setNotaFinalDirecta(alumnoId, trabajoId, val);
+      }); })(String(v));
+      chipsWrap.appendChild(btn);
     });
-    chipsHTML += '</div>';
-    if (notaFinal) {
-      chipsHTML += '<button onclick="setNotaFinalDirecta(' + "'" + alumnoId + "'" + ',' + "'" + trabajoId + "'" + ',null)" style="font-size:11px;font-family:DM Mono,monospace;color:var(--text3);background:none;border:none;cursor:pointer;padding:2px 0">Borrar nota</button>';
-    }
+    finalWrap.appendChild(chipsWrap);
 
-    return '<div class="modal-title">' + t.nombre + ' — ' + displayName(a) + '</div>'
-      + criteriosHTML
-      + '<div style="border-top:' + (t.criterios&&t.criterios.length?'2px':'1px') + ' solid var(--border);padding-top:12px;margin-top:4px">'
-      + '<div style="font-family:DM Mono,monospace;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Nota final' + (notaFinal?' — <span style=\'color:var(--ttd)\'>'+notaFinal+'</span>':'') + '</div>'
-      + chipsHTML
-      + '</div>'
-      + '<button onclick="cerrarNotaExpandida()" style="width:100%;margin-top:14px;padding:11px;background:var(--text);color:#fff;border:none;border-radius:var(--radius-sm);font-family:Bebas Neue,sans-serif;font-size:16px;cursor:pointer">Cerrar</button>';
+    if (notaFinal) {
+      var borrar = document.createElement('button');
+      borrar.textContent = 'Borrar nota';
+      borrar.style.cssText = 'font-size:11px;font-family:DM Mono,monospace;color:var(--text3);background:none;border:none;cursor:pointer;padding:2px 0;display:block;margin-bottom:8px';
+      borrar.addEventListener('click', function(){ setNotaFinalDirecta(alumnoId, trabajoId, null); });
+      finalWrap.appendChild(borrar);
+    }
+    box.appendChild(finalWrap);
+
+    // Close button
+    var cerrar = document.createElement('button');
+    cerrar.textContent = 'Cerrar';
+    cerrar.style.cssText = 'width:100%;margin-top:14px;padding:11px;background:var(--text);color:#fff;border:none;border-radius:var(--radius-sm);font-family:Bebas Neue,sans-serif;font-size:16px;cursor:pointer';
+    cerrar.addEventListener('click', function(){ cerrarNotaExpandida(); });
+    box.appendChild(cerrar);
+
+    overlay.classList.add('open');
   }
 
-  openModalRaw('modalGestionTrabajos', buildHTML());
-  window._notaExpandida.buildHTML = buildHTML;
+  window._notaExpandida.renderModal = renderModal;
+  renderModal();
 }
 
+
+function cerrarNotaExpandida() {
+  closeModalById('modalGestionTrabajos');
+}
 
 function setCriterioNota(alumnoId, trabajoId, criterioId, valor) {
   if (!currentComision.notas) currentComision.notas = {};
@@ -2728,16 +2779,10 @@ function setNotaFinalDirecta(alumnoId, trabajoId, valor) {
   save();
   toast(valor ? 'Nota guardada: ' + valor : 'Nota borrada');
   // Re-render modal
-  if (window._notaExpandida && window._notaExpandida.buildHTML) {
+  if (window._notaExpandida && window._notaExpandida.renderModal) {
     var overlay = document.getElementById('modalGestionTrabajos');
     if (overlay && overlay.classList.contains('open')) {
-      var box = overlay.querySelector('.modal');
-      if (box) {
-        var handle = box.querySelector('.modal-handle');
-        box.innerHTML = '';
-        if (handle) box.appendChild(handle);
-        box.insertAdjacentHTML('beforeend', window._notaExpandida.buildHTML());
-      }
+      window._notaExpandida.renderModal();
     }
   }
   // Also refresh main notas view
