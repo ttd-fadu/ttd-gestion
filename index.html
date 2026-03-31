@@ -99,7 +99,7 @@ async function docenteLogin() {
     btn.textContent = 'Ingresando...';
     btn.disabled = true;
     var loginPromise = window.fbDoLogin(email, pass);
-    var timeoutPromise = new Promise(res => setTimeout(() => res('timeout'), 8000));
+    var timeoutPromise = new Promise(res => setTimeout(() => res('timeout'), 15000));
     var err = await Promise.race([loginPromise, timeoutPromise]);
     btn.textContent = 'Ingresar';
     btn.disabled = false;
@@ -1100,11 +1100,15 @@ select.input-field { cursor: pointer; }
   if (typeof firebase === 'undefined') { goOffline(); return; }
 
   try {
-    firebase.initializeApp(firebaseConfig);
-    var auth = firebase.auth(); window.auth = auth;
-    var db   = firebase.firestore();
+    // Avoid "already initialized" error on hot reload
+    var _fbApp = firebase.apps && firebase.apps.length 
+      ? firebase.apps[0] 
+      : firebase.initializeApp(firebaseConfig);
+    var auth = firebase.auth(_fbApp); window.auth = auth;
+    var db   = firebase.firestore(_fbApp);
     window.fbConfigured = true;
     window._fbReady = true;
+    console.log('[TTD] Firebase inicializado OK');
 
     // Monitor auth state
     auth.onAuthStateChanged(function(user) {
@@ -1273,7 +1277,7 @@ select.input-field { cursor: pointer; }
     };
 
   } catch(e) {
-    console.warn('Firebase error:', e);
+    console.error('[TTD] Firebase error:', e.code || e.message || e);
     goOffline();
   }
   // Ensure fbRegister always exists (shows error if Firebase failed)
