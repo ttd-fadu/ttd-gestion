@@ -1464,7 +1464,7 @@ select.input-field { cursor: pointer; }
 <div class="view" id="view-config"><div class="section-title">Configuración</div>
   <div id="adminPanel" style="margin-bottom:16px"></div>
   <div id="fbUserInfo" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center"><span id="fbUserEmail"></span><button onclick="fbLogoutAndReset()" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:11px;color:var(--ausente);cursor:pointer;padding:0">Cerrar sesión</button></div>
-  <div style="margin-bottom:16px"><button onclick="cambiarContrasena()" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);cursor:pointer;padding:0;text-decoration:underline">Cambiar contraseña por email</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> PIN de acceso</div><input class="input-field" id="newPin1" type="password" inputmode="numeric" maxlength="4" placeholder="Nuevo PIN (4 dígitos)" /><input class="input-field" id="newPin2" type="password" inputmode="numeric" maxlength="4" placeholder="Confirmar PIN" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="changePin()">Cambiar PIN</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> Regularidad</div><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px">Total de clases del cuatrimestre</label><input class="input-field" id="totalClases" type="number" min="1" max="60" placeholder="Ej: 32" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="saveTotalClases()">Guardar</button></div><div style="background:rgba(255,77,106,.07);border:1px solid rgba(255,77,106,.2);border-radius:var(--radius);padding:16px"><div style="font-weight:600;margin-bottom:8px;font-family:'Bebas Neue',sans-serif;color:var(--ausente)"> Papelera de alumnos</div><div style="font-size:13px;color:var(--text2);margin-bottom:10px">Alumnos eliminados guardados como respaldo</div><div id="papeleraList"></div></div>
+  <div style="margin-bottom:16px"><button onclick="cambiarContrasena()" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:11px;color:var(--ttd);cursor:pointer;padding:0;text-decoration:underline">Cambiar contraseña por email</button></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px"><div style="font-weight:600;margin-bottom:12px;font-family:'Bebas Neue',sans-serif"> Regularidad</div><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px">Total de clases del cuatrimestre</label><input class="input-field" id="totalClases" type="number" min="1" max="60" placeholder="Ej: 32" style="margin-bottom:0"/><button class="btn-primary" style="margin-top:10px" onclick="saveTotalClases()">Guardar</button></div><div style="background:rgba(255,77,106,.07);border:1px solid rgba(255,77,106,.2);border-radius:var(--radius);padding:16px"><div style="font-weight:600;margin-bottom:8px;font-family:'Bebas Neue',sans-serif;color:var(--ausente)"> Papelera de alumnos</div><div style="font-size:13px;color:var(--text2);margin-bottom:10px">Alumnos eliminados guardados como respaldo</div><div id="papeleraList"></div></div>
 </div>
 <!-- ═══════════ VIEW: AÑO COMPLETO ═══════════ -->
 <div class="view" id="view-year-completo">
@@ -1486,7 +1486,8 @@ select.input-field { cursor: pointer; }
 <div class="modal-backdrop" id="modalAlumno" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Agregar Alumnos</div><div class="import-panel"><div class="import-tabs"><div class="import-tab active" onclick="switchImportTab('manual')">Manual</div><div class="import-tab" onclick="switchImportTab('paste')">Pegar</div><div class="import-tab" onclick="switchImportTab('excel')">Excel</div></div><div class="import-body"><div class="import-section active" id="import-manual"><input class="input-field" id="alumnoApellido" placeholder="Apellido *"/><input class="input-field" id="alumnoNombre" placeholder="Nombre *"/><input class="input-field" id="alumnoLegajo" placeholder="N° Legajo / DNI (opcional)"/><input class="input-field" id="alumnoEmail" placeholder="Email (opcional)" style="margin-bottom:0"/></div><div class="import-section" id="import-paste"><div class="info-box">Copiá celdas de Excel y pegálas aquí. La app detecta columnas automáticamente.</div><textarea class="input-field" id="pasteInput" placeholder="Pegá datos de Excel aquí..." oninput="parsePaste()"></textarea><div id="pastePreview"></div></div><div class="import-section" id="import-excel"><div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()" ondragover="dragOver(event)" ondragleave="dragLeave()" ondrop="dropFile(event)"><input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="handleFileInput(event)"><div style="font-size:24px;margin-bottom:8px;color:var(--text3);font-family:'DM Mono',monospace">XLS</div><div id="dropZoneText" style="font-size:13px">Tocá para subir Excel o CSV</div></div><div id="excelColMapping" style="display:none"><div class="section-title" style="margin-top:12px">Asignar columnas</div><div class="col-row"><span style="width:75px;flex-shrink:0">Apellido:</span><select class="input-field" id="mapApellido" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Nombre:</span><select class="input-field" id="mapNombre" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Legajo:</span><select class="input-field" id="mapLegajo" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div class="col-row"><span style="width:75px;flex-shrink:0">Email:</span><select class="input-field" id="mapEmail" style="margin-bottom:0" onchange="updateExcelPreview()"></select></div><div id="excelPreview" style="margin-top:10px"></div></div></div></div></div><div class="btn-row"><button class="btn-sm primary" onclick="confirmAddAlumnos()">Agregar</button><button class="btn-sm ghost" onclick="closeModalById('modalAlumno')">Cancelar</button></div></div>
 </div><!-- Modal: Eliminar trabajo -->
 <div class="modal-overlay" id="modalDeleteTrabajo" onclick="closeModal(event)" style="z-index:900"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Eliminar trabajo</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px">¿Eliminás <strong id="deleteTrabNombre"></strong>?</div><div style="font-size:12px;color:var(--text3);margin-bottom:16px">Se borrarán todas las notas asociadas.</div><div class="btn-row mt8"><button class="btn-sm" style="background:var(--ausente);color:#fff;border:none" onclick="confirmDeleteTrabajo()">Eliminar</button><button class="btn-sm ghost" onclick="closeModalById('modalDeleteTrabajo')">Cancelar</button></div></div>
-</div><!-- Modal: Cambio de comisión -->
+</div><!-- Modal: Eliminar comisión -->
+<div class="modal-backdrop" id="modalDelComision" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Eliminar comisión</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px">¿Eliminás <strong id="delComisionNombre"></strong>?</div><div style="font-size:12px;color:var(--text3);margin-bottom:16px">Se perderán todos los alumnos, asistencias y notas de esta comisión.</div><div class="btn-row mt8"><button class="btn-sm" style="background:var(--ausente);color:#fff;border:none" onclick="doDelComision()">Eliminar</button><button class="btn-sm ghost" onclick="closeModalById('modalDelComision')">Cancelar</button></div></div></div><!-- Modal: Cambio de comisión -->
 <div class="modal-backdrop" id="modalCambioComision" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Cambiar comisión</div><div style="font-size:13px;color:var(--text2);margin-bottom:6px"><strong id="comChangeNombre"></strong> está en <strong id="comChangeFrom"></strong>.</div><div style="font-size:13px;color:var(--text2);margin-bottom:16px">¿Mover a <strong id="comChangeTo"></strong>?</div><div class="btn-row mt8"><button class="btn-sm primary" onclick="confirmCambioComision()">Mover</button><button class="btn-sm ghost" onclick="closeModalById('modalCambioComision')">Cancelar</button></div></div>
 </div><!-- Modal: Archivar alumno -->
 <div class="modal-backdrop" id="modalArchivar" onclick="closeModal(event)"><div class="modal"><div class="modal-handle"></div><div class="modal-title">Archivar alumno</div><div style="font-size:13px;color:var(--text2);margin-bottom:4px">¿Archivás a <strong id="archiveModalNombre"></strong>?</div><div style="font-size:12px;color:var(--text3);margin-bottom:16px">Podés restaurarlo desde Configuración → Papelera.</div><div class="btn-row mt8"><button class="btn-sm" style="background:var(--ausente);color:#fff;border:none" onclick="confirmArchive()">Archivar</button><button class="btn-sm ghost" onclick="closeModalById('modalArchivar')">Cancelar</button></div></div>
@@ -1945,7 +1946,15 @@ function renderComisiones() {
       card.style.cssText += ';border-left:3px solid var(--ttd);background:rgba(255,92,0,.04)';
       card.innerHTML = '<div><div class="comision-name" style="color:var(--ttd)">' + c.name + '</div><div class="comision-meta">' + (c.alumnos?.length||0) + ' alumnos en el año</div></div><span style="color:var(--ttd);font-size:18px">›</span>';
     } else {
-      card.innerHTML = '<div><div class="comision-name">' + c.name + '</div><div class="comision-meta">' + (c.alumnos?.length||0) + ' alumnos · ' + Object.keys(c.asistencias||{}).length + ' clases' + (al.length?' · <span style="color:var(--ausente)">! ' + al.length + ' en riesgo</span>':'') + '</div></div><span style="color:var(--text3);font-size:18px">›</span>';
+      card.innerHTML = '<div style="flex:1"><div class="comision-name">' + c.name + '</div><div class="comision-meta">' + (c.alumnos?.length||0) + ' alumnos \u00b7 ' + Object.keys(c.asistencias||{}).length + ' clases' + (al.length?' \u00b7 <span style="color:var(--ausente)">! ' + al.length + ' en riesgo</span>':'') + '</div></div><span style="color:var(--text3);font-size:18px">\u203a</span>';
+      (function(comId) {
+        var db2 = document.createElement("button");
+        db2.textContent = "\u00d7";
+        db2.style.cssText = "background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;padding:4px 8px;flex-shrink:0";
+        db2.addEventListener("click", function(e){ e.stopPropagation(); confirmDelComision(comId); });
+        card.style.display="flex"; card.style.alignItems="center";
+        card.insertBefore(db2, card.lastElementChild);
+      })(c.id);
     }
     card.onclick = () => openComision(c);
     list.appendChild(card);
@@ -1956,6 +1965,25 @@ function showAddComision() {
   document.getElementById('modalComision').classList.add('open');
   setTimeout(()=>document.getElementById('newComisionInput').focus(),100);
 }
+function confirmDelComision(comId) {
+  var com = (currentYear.comisiones||[]).find(function(c){ return c.id === comId; });
+  if (!com) return;
+  _pendingDelComisionId = comId;
+  document.getElementById('delComisionNombre').textContent = com.name;
+  document.getElementById('modalDelComision').classList.add('open');
+}
+var _pendingDelComisionId = null;
+function doDelComision() {
+  if (!_pendingDelComisionId) return;
+  currentYear.comisiones = currentYear.comisiones.filter(function(c){ return c.id !== _pendingDelComisionId; });
+  _pendingDelComisionId = null;
+  closeModalById('modalDelComision');
+  syncMadre(currentYear);
+  save();
+  renderComisiones();
+  toast('Comision eliminada');
+}
+
 function confirmAddComision() {
   const name = document.getElementById('newComisionInput').value.trim();
   if (!name) return;
@@ -4080,7 +4108,16 @@ function handleMadreChipClick(alumnoId, comId) {
   var coms = getComisionesEspecificas(currentYear);
   var currentCom = coms.find(function(c){ return isAlumnoEnComision(alumnoId, c); });
   if (currentCom && currentCom.id === comId) {
-    // Already in this comision — do nothing (or could deassign, skip for now)
+    // Already in this comision — ask to remove
+    var alumno2 = (currentComision.alumnos||[]).find(function(a){ return a.id === alumnoId; });
+    if (!alumno2) alumno2 = (getMadre(currentYear).alumnos||[]).find(function(a){ return a.id === alumnoId; });
+    var nombre2 = alumno2 ? displayName(alumno2) : 'este alumno';
+    if (confirm('¿Quitar a ' + nombre2 + ' de ' + com.name + '?')) {
+      quitarAlumnoDeComision(alumnoId, currentYear, comId);
+      save();
+      renderAlumnos();
+      toast('Alumno quitado de ' + com.name);
+    }
     return;
   }
   if (currentCom) {
