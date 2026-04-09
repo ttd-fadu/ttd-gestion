@@ -583,6 +583,8 @@ body {
 }
 .asist-btn.presente.active { background: rgba(26,102,64,.08); border-color: var(--presente); color: var(--presente); }
 .asist-btn.ausente.active { background: rgba(184,28,28,.08); border-color: var(--ausente); color: var(--ausente); }
+.asist-btn.tj.active { background: rgba(30,120,220,.10); border-color: #1e78dc; color: #1e78dc; }
+.asist-btn.aj.active { background: rgba(120,60,200,.10); border-color: #7840c8; color: #7840c8; }
 .asist-btn.tardanza.active { background: rgba(255,92,0,.08); border-color: var(--tardanza); color: var(--tardanza); }
 
 /* ═══════════════════════════════════════════
@@ -1121,6 +1123,18 @@ select.input-field { cursor: pointer; }
     window.fbConfigured = true;
     window._fbReady = true;
     console.log('[TTD] Firebase inicializado OK');
+
+    // Pre-load state for alumno PIN login (no auth required for reading state)
+    db.collection('ttd').doc('state').get().then(function(snap) {
+      if (snap.exists) {
+        var remote = snap.data();
+        if (remote && typeof remote === 'object') {
+          Object.assign(state, remote);
+          window.state = state;
+          localStorage.setItem('ttd_v1', JSON.stringify(state));
+        }
+      }
+    }).catch(function(){});
 
     // Monitor auth state
     auth.onAuthStateChanged(function(user) {
@@ -2048,7 +2062,17 @@ function getAsistPct(alumnoId, comision) {
   const fechas = Object.keys(asist);
   if (!fechas.length) return null;
   let p=0, total=0;
-  fechas.forEach(f => { const v=asist[f]?.[alumnoId]; if(v){total++;if(v==='P')p++;else if(v==='T')p+=.5;} });
+  fechas.forEach(f => {
+    const v=asist[f]?.[alumnoId];
+    if(v){
+      total++;
+      if(v==='P') p+=1;
+      else if(v==='T') p+=0.5;
+      else if(v==='TJ') p+=1;
+      else if(v==='AJ') p+=1;
+      // A = 0
+    }
+  });
   return total ? Math.round((p/total)*100) : null;
 }
 function getAlertasComision(c) {
@@ -2111,19 +2135,48 @@ function renderAlumnos() {
             ${pct!==null?`<span style="font-size:10px;color:${pct>=75?'var(--teal)':'var(--ausente)'}">${pct}% asist.</span>`:''}
           </div></div><div style="display:flex;gap:6px;flex-shrink:0"><button class="obs-btn" onclick="showObsModal('${a.id}')" title="Observación">${n.observacion?'':''}</button><button class="btn-del" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:2px 4px" onclick="delAlumno('${a.id}')">×</button></div></div>
       ${n.observacion?`<div class="obs-box"> ${n.observacion}</div>`:''}
-      <div class="asist-toggle" style="margin-top:8px"><button class="asist-btn presente ${est==='P'?'active':''}" onclick="setAsist('${a.id}','P',this)">Presente</button><button class="asist-btn tardanza ${est==='T'?'active':''}" onclick="setAsist('${a.id}','T',this)">Tarde</button><button class="asist-btn ausente ${est==='A'?'active':''}" onclick="setAsist('${a.id}','A',this)">Ausente</button></div>`;
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <div class="asist-toggle" style="flex:1"><button class="asist-btn presente ${est==='P'?'active':''}" onclick="setAsist('${a.id}','P',this)">P</button><button class="asist-btn tardanza ${est==='T'?'active':''}" onclick="setAsist('${a.id}','T',this)">T</button><button class="asist-btn tj ${est==='TJ'?'active':''}" onclick="setAsist('${a.id}','TJ',this)">TJ</button><button class="asist-btn aj ${est==='AJ'?'active':''}" onclick="setAsist('${a.id}','AJ',this)">AJ</button><button class="asist-btn ausente ${est==='A'?'active':''}" onclick="setAsist('${a.id}','A',this)">A</button></div>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;flex-shrink:0;font-family:DM Mono,monospace;font-size:10px;color:var(--text3);white-space:nowrap">
+          <input type="checkbox" ${reg[a.id+'_corr']?'checked':''} onchange="setCorreccion('${a.id}',this.checked)" style="accent-color:var(--ttd);width:15px;height:15px"> Corrigió
+        </label>
+      </div>`;
     list.appendChild(row);
   });
 }
 
 function renderContadorReg() {
   const box = document.getElementById('contadorReg');
-  const total = state.totalClases||32;
+  const total = currentComision.totalClases || state.totalClases || 32;
   const fechas = Object.keys(currentComision.asistencias||{}).length;
   const restantes = Math.max(0, total - fechas);
   const pctCursado = Math.round((fechas/total)*100);
   box.innerHTML = `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:12px;color:var(--text2)">Progreso del cuatrimestre</span><span style="font-family:DM Mono,monospace;font-size:12px;color:var(--ttd)">${fechas}/${total} clases</span></div><div class="reg-bar"><div class="reg-bar-fill" style="width:${pctCursado}%;background:var(--text)"></div></div><div class="reg-label">${restantes} clases restantes · mínimo 75% asistencia para regularizar</div></div>`;
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:var(--text2)">Progreso del cuatrimestre</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-family:DM Mono,monospace;font-size:12px;color:var(--ttd)">${fechas}/${total} clases</span>
+          <input type="number" min="1" max="99" value="${total}" title="Total de clases de esta comisión"
+            onchange="currentComision.totalClases=parseInt(this.value)||32;save();renderContadorReg();"
+            style="width:44px;text-align:center;font-family:DM Mono,monospace;font-size:11px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;background:var(--surface);color:var(--text2)">
+        </div>
+      </div>
+      <div class="reg-bar"><div class="reg-bar-fill" style="width:${pctCursado}%;background:var(--text)"></div></div>
+      <div class="reg-label">${restantes} clases restantes · mínimo 75% asistencia para regularizar</div>
+    </div>`;
+}
+
+function setCorreccion(id, checked) {
+  const fecha = document.getElementById('dateInput').value;
+  if (!currentComision.asistencias) currentComision.asistencias = {};
+  if (!currentComision.asistencias[fecha]) currentComision.asistencias[fecha] = {};
+  if (checked) {
+    currentComision.asistencias[fecha][id+'_corr'] = true;
+  } else {
+    delete currentComision.asistencias[fecha][id+'_corr'];
+  }
+  save();
 }
 
 function setAsist(id, estado, btn) {
@@ -2161,7 +2214,12 @@ function confirmArchive() {
   if (!id) return;
   _pendingArchiveId = null;
   closeModalById('modalArchivar');
-  const a = currentComision.alumnos.find(x => x.id===id);
+  // Find alumno in any comision (including madre)
+  var a = null;
+  (currentYear.comisiones||[]).forEach(function(c){
+    var found = (c.alumnos||[]).find(function(x){ return x.id===id; });
+    if (found && !a) a = found;
+  });
   if (a) {
     if (!state.papelera) state.papelera = [];
     state.papelera.push(Object.assign({}, a, {
@@ -2170,7 +2228,10 @@ function confirmArchive() {
       _fecha: new Date().toISOString()
     }));
   }
-  currentComision.alumnos = currentComision.alumnos.filter(x => x.id!==id);
+  // Remove from ALL comisiones in this year (including madre)
+  (currentYear.comisiones||[]).forEach(function(c){
+    c.alumnos = (c.alumnos||[]).filter(function(x){ return x.id!==id; });
+  });
   save(); renderAlumnos(); toast('Alumno archivado');
 }
 function restaurarAlumno(id) {
