@@ -147,25 +147,37 @@ function _loginCheck() {
   // Only handles alumno PIN — docente uses email form
   const errEl = document.getElementById('loginError');
   let found = null, foundYear = null, foundComision = null;
-  const _st = window.state; // state defined in main script — access via window
+  const _st = window.state;
   if (!_st) { errEl.textContent = 'Cargando...'; errEl.style.display='block'; return; }
-  _st.years.forEach(y => y.comisiones.forEach(c =>
-    (c.alumnos || []).forEach(a => {
-      if (a.pin && a.pin === _loginBuffer) {
-        found = a; foundYear = y; foundComision = c;
-      }
-    })
-  ));
+  // Count alumnos across all comisiones (excluding madre)
+  var totalAlumnos = 0;
+  _st.years.forEach(function(y){
+    y.comisiones.forEach(function(c){
+      if (c._esMadre) return;
+      totalAlumnos += (c.alumnos||[]).length;
+      (c.alumnos||[]).forEach(function(a){
+        if (a.pin && a.pin === _loginBuffer) {
+          found = a; foundYear = y; foundComision = c;
+        }
+      });
+    });
+  });
   if (found) {
     _loginBuffer = '';
     _loginUpdateDots();
     errEl.style.display = 'none';
     document.getElementById('loginScreen').style.display = 'none';
     renderStudentView(found, foundYear, foundComision);
+  } else if (totalAlumnos === 0 && window._firestoreLoading) {
+    // State still loading from Firestore — show loading and retry
+    errEl.textContent = 'Cargando datos...';
+    errEl.style.display = 'block';
+    setTimeout(function(){
+      errEl.style.display = 'none';
+      _loginBuffer = '';
+      _loginUpdateDots();
+    }, 2000);
   } else {
-    // Count total alumnos with PINs for debug
-    var totalAlumnos = 0;
-    (state.years||[]).forEach(function(y){ (y.comisiones||[]).forEach(function(c){ totalAlumnos += (c.alumnos||[]).length; }); });
     _loginError(totalAlumnos > 0 ? 'PIN incorrecto — consultá a tu docente' : 'Sin alumnos cargados aún');
   }
 }
@@ -1125,7 +1137,9 @@ select.input-field { cursor: pointer; }
     console.log('[TTD] Firebase inicializado OK');
 
     // Pre-load state for alumno PIN login (no auth required for reading state)
+    window._firestoreLoading = true;
     db.collection('ttd').doc('state').get().then(function(snap) {
+      window._firestoreLoading = false;
       if (snap.exists) {
         var remote = snap.data();
         if (remote && typeof remote === 'object') {
@@ -1134,7 +1148,7 @@ select.input-field { cursor: pointer; }
           localStorage.setItem('ttd_v1', JSON.stringify(state));
         }
       }
-    }).catch(function(){});
+    }).catch(function(){ window._firestoreLoading = false; });
 
     // Monitor auth state
     auth.onAuthStateChanged(function(user) {
@@ -1467,10 +1481,10 @@ select.input-field { cursor: pointer; }
 </div><!-- ═══════════ VIEW: COMISION DETAIL ═══════════ -->
 <div class="view" id="view-comision"><div class="pill" id="comisionPill"></div><div class="tabs" id="mainTabs"><div class="tab active" onclick="switchTab('asistencia')">Asist.</div><div class="tab" onclick="switchTab('notas')">Notas</div><div class="tab" onclick="switchTab('grupos')">Grupos</div><div class="tab" onclick="switchTab('drive')">Drive</div><div class="tab" onclick="switchTab('calendario')">Cal.</div><div class="tab" onclick="switchTab('historial')">Hist.</div><div class="tab" onclick="switchTab('resumen')">Resumen</div></div><!-- ASISTENCIA --><div id="tab-asistencia"><div id="contadorReg" style="margin-bottom:12px"></div><div class="date-bar">
   <span class="date-label">Clase del</span>
-  <label for="dateInput" style="position:relative;display:inline-block;cursor:pointer">
-    <input type="date" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:5;border:none;font-size:16px" onchange="updateDateDisplay();renderAlumnos();">
-    <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);min-width:120px;text-align:center;pointer-events:none">—</div>
-  </label>
+  <div style="position:relative;display:inline-block;cursor:pointer" onclick="var d=document.getElementById('dateInput');try{d.showPicker()}catch(e){d.focus();d.click()}">
+    <input type="date" id="dateInput" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2;border:none;font-size:16px" onchange="updateDateDisplay();renderAlumnos();">
+    <div id="dateDisplay" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:13px;color:var(--ttd);min-width:120px;text-align:center;position:relative;z-index:1;pointer-events:none">—</div>
+  </div>
 </div><div id="alertasComision" style="margin-bottom:10px"></div><div id="alumnoList"></div><div class="action-row"><button class="btn-secondary" onclick="showModalAlumno()">+ Alumno</button><button class="btn-secondary" onclick="exportCSV()">↓ CSV</button><button class="btn-secondary" onclick="exportPDF()">↓ PDF</button></div></div><!-- NOTAS --><div id="tab-notas" style="display:none"><div id="notasList"></div><button class="btn-primary" onclick="saveNotas()">Guardar notas</button></div><!-- GRUPOS --><div id="tab-grupos" style="display:none"><div id="gruposList"></div><button class="btn-ghost-add mt8" onclick="showAddGrupo()">+ Nuevo grupo</button></div><!-- DRIVE --><div id="tab-drive" style="display:none"><div class="info-box"> Conectá una carpeta pública de Google Drive para detectar entregas automáticamente.</div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-weight:600;font-size:14px"> Google Drive</span><span id="driveStatusBadge" style="font-size:11px;color:var(--text3)">No conectado</span></div><div id="driveNotConnected"><input class="input-field" type="text" id="driveFolderUrl" placeholder="https://drive.google.com/drive/folders/..." style="margin-bottom:8px"/><button class="btn-primary" style="margin-top:0" onclick="driveConnect()">Conectar carpeta</button></div><div id="driveConnected" style="display:none"><div style="font-size:12px;color:var(--text3);margin-bottom:10px" id="driveLastSync"></div><button class="btn-secondary" onclick="driveSyncNow()" style="width:100%;justify-content:center">Sincronizar</button><div id="driveFileList" style="margin-top:12px"></div></div></div><div class="section-title mt16">Entregas por alumno</div><div id="entregaAlumnoList"></div><button class="btn-primary" onclick="saveNotas()">Guardar</button></div><!-- CALENDARIO --><div id="tab-calendario" style="display:none"><div id="calendarWidget"></div><div class="action-row"><button class="btn-secondary" onclick="showAddEvento('clase')" style="flex:1;justify-content:center">+ Clase</button><button class="btn-secondary" onclick="showAddEvento('invitado')" style="flex:1;justify-content:center">+ Invitado</button><button class="btn-secondary" onclick="showAddEvento('entrega')" style="flex:1;justify-content:center">+ Entrega</button><button class="btn-secondary" onclick="showAddEvento('feriado')" style="flex:1;justify-content:center">+ Feriado</button></div><div class="cal-event-list" id="calEventList"></div><div id="calImportArea"></div></div><!-- HISTORIAL --><div id="tab-historial" style="display:none"><div id="historialList"></div></div><!-- RESUMEN --><div id="tab-resumen" style="display:none"><div class="resumen-grid" id="resumenGrid"></div><div class="chart-wrap"><div class="chart-title">Evolución de asistencia</div><canvas id="chartCanvas" class="chart-canvas"></canvas></div><div class="section-title">Ranking de participación</div><div id="rankingList" style="margin-bottom:16px"></div><div class="section-title">Por alumno</div><div id="resumenAlumnos"></div></div>
 </div><!-- ═══════════ VIEW: PROGRAMA ═══════════ -->
 <div class="view" id="view-programa"><div class="section-title" id="programaTitleEl">Programa de la materia</div><div id="programaList"></div><button class="btn-ghost-add" onclick="showAddPrograma()">+ Agregar unidad</button>
