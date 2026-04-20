@@ -146,6 +146,16 @@ function _loginUpdateDots() {
 function _loginCheck() {
   // Only handles alumno PIN — docente uses email form
   const errEl = document.getElementById('loginError');
+  // If Firestore hasn't loaded yet, wait and retry
+  if (window._firestoreLoading || window._stateReady === false) {
+    errEl.textContent = 'Cargando datos...';
+    errEl.style.display = 'block';
+    setTimeout(function(){
+      errEl.style.display = 'none';
+      if (_loginBuffer.length === 4) _loginCheck();
+    }, 1500);
+    return;
+  }
   let found = null, foundYear = null, foundComision = null;
   const _st = window.state;
   if (!_st) { errEl.textContent = 'Cargando...'; errEl.style.display='block'; return; }
@@ -1138,8 +1148,13 @@ select.input-field { cursor: pointer; }
 
     // Pre-load state for alumno PIN login (no auth required for reading state)
     window._firestoreLoading = true;
+    window._stateReady = false;
     db.collection('ttd').doc('state').get().then(function(snap) {
       window._firestoreLoading = false;
+      window._stateReady = true;
+      // Update PIN hint to confirm data is ready
+      var hint = document.getElementById('loginHint');
+      if (hint && hint.textContent.includes('Cargando')) hint.textContent = 'Ingresá tu PIN de 4 dígitos';
       if (snap.exists) {
         var remote = snap.data();
         if (remote && typeof remote === 'object') {
@@ -1148,7 +1163,10 @@ select.input-field { cursor: pointer; }
           localStorage.setItem('ttd_v1', JSON.stringify(state));
         }
       }
-    }).catch(function(){ window._firestoreLoading = false; });
+    }).catch(function(){
+      window._firestoreLoading = false;
+      window._stateReady = true; // use localStorage fallback
+    });
 
     // Monitor auth state
     auth.onAuthStateChanged(function(user) {
@@ -2777,7 +2795,7 @@ function openNotaModal(alumnoId, trabajoId) {
   const t = getTrabajos().find(x => x.id === trabajoId);
   const a = currentComision.alumnos.find(x => x.id === alumnoId);
   const n = getNota(alumnoId, trabajoId);
-  const chips = (state.notaSistema === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
+  const chips = ((t && t.sistema ? t.sistema : state.notaSistema) === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
   _buildNotaModal(
     (t ? t.nombre : 'Nota') + ' — ' + displayName(a),
     chips, n ? n.valor : null, 'confirmNota'
@@ -2791,7 +2809,7 @@ function openGrupoNotaModal(grupoId, trabajoId) {
   const g = (currentComision ? currentComision.grupos || [] : []).find(x => x.id === grupoId);
   const firstMember = g && g.miembros && g.miembros[0];
   const n = firstMember ? getNota(firstMember, trabajoId) : null;
-  const chips = (state.notaSistema === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
+  const chips = ((t && t.sistema ? t.sistema : state.notaSistema) === 'conceptual' ? NOTAS_CON : NOTAS_NUM);
   _buildNotaModal(
     (t ? t.nombre : 'Nota') + ' — ' + (g ? g.nombre : 'Grupo') + ' (grupal)',
     chips, n ? n.valor : null, 'confirmNotaGrupal'
